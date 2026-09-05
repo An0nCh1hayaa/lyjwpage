@@ -212,10 +212,11 @@ export async function cachedWatching(scope: StatusCacheScope) {
   return statusEnvelope(getWatching);
 }
 
-export async function cachedNowWatching(scope: StatusCacheScope) {
+/** 只有首屏用。端点那份两条路都直读，见下面 nowWatchingStatus */
+export async function cachedNowWatching() {
   "use cache";
   cacheLife(STATUS_LIFE);
-  cacheTag(statusCacheTag(scope, NOW_WATCHING_TAG));
+  cacheTag(statusCacheTag("page", NOW_WATCHING_TAG));
   return statusEnvelope(getNowWatching);
 }
 
@@ -256,11 +257,18 @@ export async function cachedGithubChart() {
 
 /**
  * 首屏同步歌词：按曲目 ID 缓存解析后的歌词。
- * 一首歌的歌词不会变，所以 cacheLife("max")，首屏预渲染白拿。
+ *
+ * 不用 `cacheLife("max")`：resolveLyrics 自己的 Redis 层按结论分档（有 7 天、
+ * 没有 1 小时，理由见 lib/lyrics 的 NO_LYRICS_TTL_MS），max 会把「没有」和这里
+ * 吞掉错误后的 null 一起冻到下次部署，那首歌的首屏从此没词。revalidate 取 1 小时
+ * 对齐那档负缓存，expire 取 7 天对齐正缓存；这层只是首屏预渲染的壳，真正的
+ * 长期缓存在 Redis。
  */
+const LYRICS_LIFE = { revalidate: 60 * 60, expire: 7 * 24 * 60 * 60 };
+
 export async function cachedLyrics(songId: string): Promise<LyricsResult | null> {
   "use cache";
-  cacheLife("max");
+  cacheLife(LYRICS_LIFE);
   try {
     return await resolveLyrics(songId);
   } catch (error) {
@@ -293,7 +301,18 @@ export const nowListeningStatus = statusSource(
   getNowListeningSnapshot,
 );
 export const watchingStatus = statusSource(() => cachedWatching("api"), getWatching);
-export const nowWatchingStatus = statusSource(() => cachedNowWatching("api"), getNowWatching);
+/**
+ * Emby 此刻在播的端点**两条路都直读**。
+ *
+ * 进度是读的那一刻按墙上的钟推算的（emby-store 的 resolveNowPlaying），快照里
+ * 没有能重新投影的原始时刻，所以路由从前在 overlay 里整个重读一遍 —— 缓存那份
+ * 读完就扔，api 条目和它的 tag 失效全是白做的。首屏那份仍走 cachedNowWatching，
+ * 冻住的进度由挂载后的第一次轮询纠正。
+ */
+export const nowWatchingStatus = statusSource(
+  () => statusEnvelope(getNowWatching),
+  getNowWatching,
+);
 export const playingStatus = statusSource(() => cachedPlaying("api"), getPlaying);
 export const playingNowStatus = statusSource(() => cachedPlayingNow("api"), getPlayingNow);
 export const trophiesStatus = statusSource(cachedTrophies, getTrophies);

@@ -72,7 +72,7 @@ export default async function Home() {
     cachedVibeCoding("page"),
     cachedVibeCodingYear("page"),
     cachedWatching("page"),
-    cachedNowWatching("page"),
+    cachedNowWatching(),
     cachedPlaying("page"),
     cachedPlayingNow("page"),
     cachedTrophiesSummary(),

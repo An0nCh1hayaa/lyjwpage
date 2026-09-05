@@ -125,8 +125,8 @@ function statusJson<T>(envelope: StatusResponse<T>): NextResponse<StatusResponse
  *
  * **只管状态端点。** 首屏那份得冻着才能预渲染（见 next.config.ts 和
  * lib/status-cache），所以关掉之后第一帧仍可能旧到 10 分钟，挂载后 SWR 打这些端点
- * 就是最新的。要连首屏一起对齐，得给两份部署各配一个共享的 cacheHandlers，
- * 见 lib/live-events 的 expireStatus。
+ * 就是最新的。光配共享的 cacheHandlers 对不齐首屏：EdgeOne 的边缘还按 Next 发的
+ * ISR 头另存一份 HTML，见 lib/live-events 的 expireStatus。
  */
 const STATUS_CACHE = process.env.STATUS_CACHE !== "false";
 

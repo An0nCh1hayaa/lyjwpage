@@ -100,7 +100,9 @@ export type LiveEvent =
 
 /**
  * 状态主题，一份一个。缓存标签另加 page / api 前缀，配对见 lib/status-cache。
- * （github-chart 是个例外：它那份没有 tag，只靠 cacheLife 兜底。）
+ * （两个例外：github-chart 那份没有 tag，只靠 cacheLife 兜底；watching-now 只有
+ * page 条目，端点两条路都直读 Redis，见 lib/status-cache 的 nowWatchingStatus ——
+ * emby 照样推它的 tag，`api:watching-now` 那一半打在空处，无害。）
  *
  * 名字和上面的事件名逐字相同，也就和 /api/status/* 的路径同一套：`X` 是列表、
  * `X-now` 是此刻，URL 里的 `/` 在名字里写成 `-`（AGENTS.md 第 2 条，路径常量在
@@ -159,8 +161,16 @@ export const TROPHIES_TAG = "trophies";
  * 共享的缓存和 tag 存储，所以在那边看起来是全局的；EdgeOne 跑的是原样的 Next
  * （腾讯云 SCF，多实例），收到上报的那个实例只失效自己那份，别的实例要等 cacheLife
  * 的 10 分钟兜底 —— 那份部署因此把 STATUS_CACHE 关掉，状态端点一律直读 Redis，
- * 见 lib/api。首屏仍然靠这里失效，要让它也名副其实，得给两份部署各配一个共享的
- * cacheHandlers（各用各的 Redis 存 tag 时间戳）。
+ * 见 lib/api。
+ *
+ * **首屏在 EdgeOne 上还多一层边缘缓存，共享 cacheHandlers 也够不着。** Next 给
+ * 预渲染页发的是按 STATUS_LIFE 算出的 ISR 头，2026-09-06 从 lyjw131.com 实测：
+ * `Cache-Control: s-maxage=600, stale-while-revalidate=604200, durable`。Vercel 会把
+ * 它改写成 `max-age=0, must-revalidate`、用自己的缓存管新鲜度，EdgeOne 则原样在边缘
+ * 存 10 分钟。所以就算各配一个 Redis 存 tag 时间戳把实例对齐了，边缘那份 HTML 也要
+ * 等 s-maxage 到期；真要对齐得在上报扇出里再清一次 EdgeOne 的缓存。revalidate 又
+ * 不能短于 5 分钟（短了就退出预渲染，见 lib/status-cache 的 STATUS_LIFE），当前
+ * 取舍是接受这 10 分钟：同日两个域名并排量，首屏都只旧 2~3 分钟，挂载后 SWR 纠正。
  *
  * 跨部署那半是另一件事，已经解决了：整条上报会被转给对端（lib/ingest-relay），
  * 它自己跑一遍同一个 handler、自己走到这里，失效是那次处理的自然结果，不再需要
