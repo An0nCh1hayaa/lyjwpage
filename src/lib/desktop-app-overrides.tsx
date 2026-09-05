@@ -1,8 +1,6 @@
 import AntigravityColor from "@lobehub/icons/es/Antigravity/components/Color";
 import AntigravityText from "@lobehub/icons/es/Antigravity/components/Text";
 import ClaudeCodeText from "@lobehub/icons/es/ClaudeCode/components/Text";
-import CodexColor from "@lobehub/icons/es/Codex/components/Color";
-import CodexText from "@lobehub/icons/es/Codex/components/Text";
 import CursorIcon from "@lobehub/icons/es/Cursor/components/Mono";
 import CursorText from "@lobehub/icons/es/Cursor/components/Text";
 import { EyeOff } from "lucide-react";
@@ -48,18 +46,6 @@ export const DESKTOP_APP_OVERRIDES: readonly DesktopAppOverride[] = [
     ),
     renderText: ({ size = 20, className }) => (
       <AntigravityText size={size} className={className} />
-    ),
-  },
-  {
-    key: "codex",
-    displayName: "Codex",
-    match: (id) =>
-      id === "com.openai.codex" || id.toLowerCase().includes("openai.codex"),
-    renderIcon: ({ size = 24, className }) => (
-      <CodexColor size={size} className={className} />
-    ),
-    renderText: ({ size = 20, className }) => (
-      <CodexText size={size} className={className} />
     ),
   },
   {
