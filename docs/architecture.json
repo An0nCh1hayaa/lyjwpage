@@ -2,683 +2,246 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "lyjwpage 运行时架构",
+    "title": "Mac 上报与 Vercel 读取",
     "locale": "zh-CN",
     "output": "docs/architecture.html",
     "quality_profile": "showcase",
-    "views": [
-      {
-        "id": "ingest",
-        "label": "上报入库",
-        "focus": [
-          "vps",
-          "psn_reporter",
-          "device_hubs",
-          "lan_reporters",
-          "ingest",
-          "edgeone"
-        ],
-        "note": "各上报侧只跟一个源说话，POST 到 /api/ingest/<来源>。Vercel 那份由 ingest Worker 接，EdgeOne 那份暂由站点自己接。"
-      },
-      {
-        "id": "relay",
-        "label": "两份生产互转",
-        "focus": [
-          "ingest",
-          "edgeone",
-          "redis_vercel",
-          "redis_edgeone",
-          "vercel"
-        ],
-        "note": "收到上报的那份原样转给对端；Worker 写 Vercel 的 Redis 后回敲 lyjw.me/api/revalidate，EdgeOne 写自己的 Redis、刷自己的 tag。"
-      },
-      {
-        "id": "push",
-        "label": "浏览器三条腿",
-        "focus": [
-          "vercel",
-          "edgeone",
-          "ingest",
-          "live_push_cn",
-          "browser"
-        ],
-        "note": "SSR 首屏、SWR 轮询 /api/status/*、Worker 房间的 WebSocket 推送。"
-      },
-      {
-        "id": "counter",
-        "label": "在线人数反馈环",
-        "focus": [
-          "browser",
-          "online_counter",
-          "psn_reporter"
-        ],
-        "note": "浏览器连上就是一个人头，PlayStation 上报 Worker 读 /count 在三档之间切换。"
-      },
-      {
-        "id": "assets",
-        "label": "图片直传 R2",
-        "focus": [
-          "device_hubs",
-          "lan_reporters",
-          "r2"
-        ],
-        "note": "上报侧把图片字节直传 R2，站点只收 objectKey，从不经手图片本身。"
-      }
+    "viewBox": [
+      1390,
+      820
     ],
     "repository": {
       "url": "https://github.com/LYJW131/lyjwpage",
       "revision": "7994424debed99c21a931944b446dd7e946eef3c"
-    }
+    },
+    "views": [
+      {
+        "id": "write",
+        "label": "上报写入",
+        "focus": [
+          "mac",
+          "worker",
+          "redis"
+        ],
+        "note": "Mac 直连 ingest Worker。Worker 接收模块、写入 Redis。"
+      },
+      {
+        "id": "read",
+        "label": "页面读取",
+        "focus": [
+          "redis",
+          "site",
+          "web"
+        ],
+        "note": "Vercel 从 Redis 读取状态，生成首屏并提供 /api/status/*。"
+      },
+      {
+        "id": "live",
+        "label": "实时更新",
+        "focus": [
+          "worker",
+          "site",
+          "web"
+        ],
+        "note": "Worker 回敲 /api/revalidate，并通过 /ws 直接推送浏览器。"
+      }
+    ]
   },
   "components": [
     {
-      "id": "vps",
+      "id": "mac",
       "type": "external",
-      "label": "server-reporter",
-      "sublabel": "东京落地节点 · systemd",
-      "tag": "三档 60s / 2min / 15min",
+      "label": "Mac Telemetry Hub",
+      "sublabel": "本机采集 · 统一遥测信封",
+      "tag": "实际配置已直连",
       "pos": [
-        130,
-        60
+        60,
+        105
       ],
       "size": [
-        175,
-        78
-      ],
-      "sources": [
-        {
-          "path": "reporters/server-reporter/reporter.py"
-        },
-        {
-          "path": "reporters/server-reporter/server-reporter.service"
-        }
-      ]
-    },
-    {
-      "id": "psn_reporter",
-      "type": "cloud",
-      "label": "playstation-reporter",
-      "sublabel": "Worker · cron 闸门",
-      "tag": "三档 · 每分钟 cron 闸门",
-      "pos": [
-        130,
-        178
-      ],
-      "size": [
-        175,
-        86
-      ],
-      "sources": [
-        {
-          "path": "workers/playstation-reporter/src/index.ts",
-          "label": "shouldTick"
-        },
-        {
-          "path": "workers/playstation-reporter/wrangler.toml"
-        }
-      ]
-    },
-    {
-      "id": "device_hubs",
-      "type": "external",
-      "label": "设备遥测中心",
-      "sublabel": "Mac / iPhone Telemetry Hub",
-      "tag": "事件驱动",
-      "pos": [
-        130,
-        426
-      ],
-      "size": [
-        175,
-        78
+        240,
+        100
       ],
       "sources": [
         {
           "path": "src/app/api/ingest/mac/route.ts"
-        },
-        {
-          "path": "reporters/iphone-telemetry-hub/README.md"
         }
       ]
     },
     {
-      "id": "r2",
-      "type": "cloud",
-      "label": "Cloudflare R2",
-      "sublabel": "海报 / 图标 · objectKey",
-      "pos": [
-        130,
-        584
-      ],
-      "size": [
-        175,
-        78
-      ],
-      "sources": [
-        {
-          "path": "src/lib/r2-assets.ts"
-        }
-      ]
-    },
-    {
-      "id": "lan_reporters",
-      "type": "external",
-      "label": "内网上报侧",
-      "sublabel": "Emby · HA",
-      "tag": "NAS / HA",
-      "pos": [
-        130,
-        707
-      ],
-      "size": [
-        175,
-        86
-      ],
-      "sources": [
-        {
-          "path": "reporters/emby-reporter/README.md"
-        }
-      ]
-    },
-    {
-      "id": "vercel",
-      "type": "backend",
-      "label": "lyjw.me",
-      "sublabel": "Next.js 16 · Vercel 生产",
-      "tag": "主站 · 只读",
-      "pos": [
-        850,
-        265
-      ],
-      "size": [
-        215,
-        86
-      ],
-      "sources": [
-        {
-          "path": "src/lib/api.ts",
-          "label": "statusRoute"
-        },
-        {
-          "path": "src/app/api/revalidate/route.ts",
-          "label": "POST /api/revalidate"
-        },
-        {
-          "path": "src/app/page.tsx",
-          "label": "首屏 SSR"
-        }
-      ]
-    },
-    {
-      "id": "edgeone",
-      "type": "backend",
-      "label": "lyjw131.com",
-      "sublabel": "Next.js 16 · EdgeOne 生产",
-      "tag": "STATUS_CACHE=false",
-      "pos": [
-        490,
-        501
-      ],
-      "size": [
-        215,
-        86
-      ],
-      "sources": [
-        {
-          "path": "src/lib/ingest-relay.ts",
-          "label": "INGEST_PEERS 转发"
-        },
-        {
-          "path": "src/lib/status-cache.ts"
-        }
-      ]
-    },
-    {
-      "id": "redis_vercel",
-      "type": "database",
-      "label": "Redis · Vercel 侧",
-      "sublabel": "Worker 写 · 站点读",
-      "pos": [
-        655,
-        60
-      ],
-      "size": [
-        215,
-        74
-      ],
-      "sources": [
-        {
-          "path": "src/lib/redis.ts"
-        },
-        {
-          "path": "workers/ingest/src/redis-client.ts",
-          "label": "RESP over cloudflare:sockets"
-        }
-      ]
-    },
-    {
-      "id": "redis_edgeone",
-      "type": "database",
-      "label": "Redis · EdgeOne 侧",
-      "sublabel": "状态端点一律直读",
-      "pos": [
-        490,
-        697
-      ],
-      "size": [
-        215,
-        74
-      ],
-      "sources": [
-        {
-          "path": "src/lib/status-cache.ts",
-          "label": "STATUS_CACHE 开关"
-        }
-      ]
-    },
-    {
-      "id": "ingest",
+      "id": "worker",
       "type": "messagebus",
-      "label": "ingest",
-      "sublabel": "上报入口 + Durable Object 房间",
+      "label": "ingest Worker",
+      "sublabel": "ingest.homepage.lyjw.llc",
+      "tag": "接收 · 写入 · 推送",
       "pos": [
-        490,
-        265
+        520,
+        105
       ],
       "size": [
-        215,
-        86
+        290,
+        100
       ],
-      "tag": "Vercel 侧写路径",
       "sources": [
         {
-          "path": "workers/ingest/src/index.ts",
-          "label": "/api/ingest/<来源> · /ws"
+          "path": "workers/ingest/src/index.ts"
         },
         {
-          "path": "src/lib/live-events.ts",
-          "label": "fanout()"
+          "path": "src/lib/live-events.ts"
         }
       ]
     },
     {
-      "id": "browser",
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "遥测状态与历史",
+      "tag": "Worker 写入",
+      "pos": [
+        1030,
+        105
+      ],
+      "size": [
+        250,
+        100
+      ],
+      "sources": [
+        {
+          "path": "workers/ingest/src/redis-client.ts"
+        }
+      ]
+    },
+    {
+      "id": "site",
+      "type": "backend",
+      "label": "Vercel · lyjw.me",
+      "sublabel": "Next.js 首屏与状态 API",
+      "tag": "读取状态 · 缓存失效",
+      "pos": [
+        1030,
+        595
+      ],
+      "size": [
+        250,
+        100
+      ],
+      "sources": [
+        {
+          "path": "src/lib/api.ts"
+        },
+        {
+          "path": "src/app/api/revalidate/route.ts"
+        }
+      ]
+    },
+    {
+      "id": "web",
       "type": "frontend",
       "label": "浏览器",
-      "sublabel": "SSR · SWR · WebSocket",
+      "sublabel": "首屏 · SWR · WebSocket",
+      "tag": "读取与实时更新",
       "pos": [
-        1175,
-        350
+        520,
+        595
       ],
       "size": [
-        175,
-        92
+        290,
+        100
       ],
       "sources": [
         {
-          "path": "src/hooks/use-status.ts",
-          "label": "SWR 轮询"
+          "path": "src/hooks/use-status.ts"
         },
         {
-          "path": "src/hooks/use-live-events.ts",
-          "label": "推送写进 SWR 缓存"
-        }
-      ]
-    },
-    {
-      "id": "edge_helpers",
-      "type": "cloud",
-      "label": "musickit-token",
-      "pos": [
-        1175,
-        170
-      ],
-      "size": [
-        175,
-        88
-      ],
-      "tag": "浏览器直连",
-      "sources": [
-        {
-          "path": "workers/musickit-token/src/index.ts"
-        }
-      ]
-    },
-    {
-      "id": "apple_music",
-      "type": "external",
-      "label": "Apple Music",
-      "sublabel": "目录 API · amp-api",
-      "tag": "站点自决",
-      "pos": [
-        950,
-        60
-      ],
-      "size": [
-        175,
-        88
-      ],
-      "sources": [
-        {
-          "path": "src/lib/apple-music.ts",
-          "label": "目录查询"
-        },
-        {
-          "path": "src/lib/apple-web-token.ts",
-          "label": "amp-api 的 web token"
-        },
-        {
-          "path": "src/app/api/lyrics/route.ts",
-          "label": "歌词 / 动态封面按此刻在播自决"
-        }
-      ]
-    },
-    {
-      "id": "online_counter",
-      "type": "cloud",
-      "label": "online-counter",
-      "sublabel": "Durable Object",
-      "pos": [
-        820,
-        740
-      ],
-      "size": [
-        190,
-        82
-      ],
-      "tag": "清扫死连接",
-      "sources": [
-        {
-          "path": "workers/online-counter/src/index.ts"
-        },
-        {
-          "path": "src/hooks/use-online-count.ts"
-        }
-      ]
-    },
-    {
-      "id": "live_push_cn",
-      "type": "messagebus",
-      "label": "live-push",
-      "sublabel": "EdgeOne 侧 · Durable Object",
-      "pos": [
-        850,
-        580
-      ],
-      "size": [
-        170,
-        74
-      ],
-      "tag": "待并入",
-      "sources": [
-        {
-          "path": "workers/ingest/README.md",
-          "label": "前身；国内那份仍在用"
+          "path": "src/hooks/use-live-events.ts"
         }
       ]
     }
   ],
   "connections": [
     {
-      "id": "vps_in",
-      "from": "vps",
-      "to": "ingest",
-      "label": "/api/ingest/server",
+      "id": "post",
+      "from": "mac",
+      "to": "worker",
+      "label": "POST /api/ingest/mac",
       "variant": "emphasis"
     },
     {
-      "id": "psn_in",
-      "from": "psn_reporter",
-      "to": "ingest",
-      "label": "/api/ingest/playstation",
-      "variant": "emphasis",
-      "labelAt": [
-        415,
-        335
-      ]
-    },
-    {
-      "id": "dev_in",
-      "from": "device_hubs",
-      "to": "edgeone",
-      "label": "/api/ingest/mac · /iphone",
-      "variant": "emphasis",
-      "labelDx": 85,
-      "labelDy": -25
-    },
-    {
-      "id": "lan_in",
-      "from": "lan_reporters",
-      "to": "edgeone",
-      "label": "/api/ingest/emby、/homepod",
+      "id": "write",
+      "from": "worker",
+      "to": "redis",
+      "label": "写入状态",
       "variant": "emphasis"
     },
     {
-      "id": "dev_r2",
-      "from": "device_hubs",
-      "to": "r2",
-      "label": "字节直传",
-      "variant": "dashed",
+      "id": "read",
+      "from": "site",
+      "to": "redis",
+      "label": "读取状态",
+      "variant": "default"
+    },
+    {
+      "id": "page",
+      "from": "site",
+      "to": "web",
+      "label": "SSR + /api/status/*",
+      "variant": "default",
       "labelAt": [
-        218,
-        544
-      ]
-    },
-    {
-      "id": "lan_r2",
-      "from": "lan_reporters",
-      "to": "r2",
-      "variant": "dashed"
-    },
-    {
-      "id": "relay_down",
-      "from": "ingest",
-      "to": "edgeone",
-      "label": "单跳转发",
-      "variant": "security",
-      "labelAt": [
-        655,
-        420
-      ]
-    },
-    {
-      "id": "v_redis",
-      "from": "vercel",
-      "to": "redis_vercel",
-      "label": "只读",
-      "fromSide": "top",
-      "toSide": "right"
-    },
-    {
-      "id": "e_redis",
-      "from": "edgeone",
-      "to": "redis_edgeone",
-      "label": "落库 · 直读",
-      "labelAt": [
-        535,
-        640
-      ]
-    },
-    {
-      "id": "v_browser",
-      "from": "vercel",
-      "to": "browser",
-      "label": "SSR + SWR 轮询",
-      "variant": "emphasis",
-      "labelAt": [
-        1118,
-        309
-      ]
-    },
-    {
-      "id": "e_push",
-      "from": "edgeone",
-      "to": "live_push_cn",
-      "label": "POST /publish",
-      "fromSide": "right",
-      "toSide": "left",
-      "labelAt": [
-        778,
-        570
-      ]
-    },
-    {
-      "id": "e_browser",
-      "from": "edgeone",
-      "to": "browser",
-      "label": "同一套 /api/status/*",
-      "variant": "emphasis",
-      "fromSide": "bottom",
-      "toSide": "left",
-      "labelAt": [
-        735,
-        670
+        920,
+        765
       ],
-      "via": [
-        [
-          597.5,
-          680
-        ],
-        [
-          1140,
-          680
-        ],
-        [
-          1140,
-          396
-        ]
-      ]
-    },
-    {
-      "id": "push_browser",
-      "from": "ingest",
-      "to": "browser",
-      "label": "wss 推事件",
-      "variant": "emphasis",
-      "fromSide": "right",
-      "toSide": "left",
-      "via": [
-        [
-          730,
-          308
-        ],
-        [
-          730,
-          420
-        ],
-        [
-          1105,
-          420
-        ],
-        [
-          1105,
-          396
-        ]
-      ],
-      "labelAt": [
-        930,
-        410
-      ]
-    },
-    {
-      "id": "helpers_browser",
-      "from": "edge_helpers",
-      "to": "browser",
-      "label": "令牌",
-      "variant": "dashed",
-      "labelAt": [
-        1262,
-        304
-      ]
-    },
-    {
-      "id": "browser_count",
-      "from": "browser",
-      "to": "online_counter",
-      "label": "wss /ws 计人头",
-      "variant": "dashed",
       "fromSide": "bottom",
-      "toSide": "right",
+      "toSide": "bottom",
       "via": [
         [
-          1262.5,
-          781
+          1155,
+          740
+        ],
+        [
+          665,
+          740
         ]
       ]
     },
     {
-      "id": "count_psn",
-      "from": "online_counter",
-      "to": "psn_reporter",
-      "label": "GET /count 调频（可见）· 两家都读",
-      "variant": "dashed",
-      "fromSide": "bottom",
-      "toSide": "left",
-      "via": [
-        [
-          915,
-          850
-        ],
-        [
-          50,
-          850
-        ],
-        [
-          50,
-          221
-        ]
-      ]
-    },
-    {
-      "id": "ingest_redis",
-      "from": "ingest",
-      "to": "redis_vercel",
-      "label": "落库",
+      "id": "push",
+      "from": "worker",
+      "to": "web",
+      "label": "WebSocket /ws",
       "variant": "emphasis",
-      "fromSide": "top",
-      "toSide": "left"
+      "labelAt": [
+        665,
+        400
+      ]
     },
     {
-      "id": "ingest_revalidate",
-      "from": "ingest",
-      "to": "vercel",
+      "id": "invalidate",
+      "from": "worker",
+      "to": "site",
       "label": "POST /api/revalidate",
-      "labelAt": [
-        778,
-        297
-      ]
-    },
-    {
-      "id": "cn_push_browser",
-      "from": "live_push_cn",
-      "to": "browser",
-      "label": "wss 推事件",
-      "labelAt": [
-        1085,
-        558
-      ]
+      "variant": "dashed"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "Vercel 写入迁出",
+      "title": "Mac 直连",
       "items": [
-        "Worker 入库、推送并回敲缓存；Vercel 路由层转交上报，国内侧暂不迁移。"
+        "上报端点：ingest.homepage.lyjw.llc/api/ingest/mac"
       ]
     },
     {
       "dot": "emerald",
-      "title": "推送与调频",
+      "title": "职责划分",
       "items": [
-        "新旧域名进入同一房间，/count 沿用原地址；可见、开着、无人对应三档。"
+        "Worker 接收、写入、推送；Vercel 读取状态并管理页面缓存。"
       ]
     },
     {
       "dot": "violet",
-      "title": "旁路与例外",
+      "title": "本图范围",
       "items": [
-        "图片直传 R2；最近在听仍由站点拉取、写缓存，经 /publish 推送。"
+        "仅展示 Mac 上报链路；图片仍由 Mac 直传 R2。"
       ]
     }
   ]

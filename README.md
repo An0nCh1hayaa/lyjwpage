@@ -111,18 +111,20 @@ Worker 使用 R2 绑定检查对象是否存在。Emby 的 `missingImages` 和 M
 **Worker 的地址一律走环境变量**，源码里不写死 —— 否则任何人 clone 这个仓库跑起来
 都会去打这边的 Worker。
 
-### 整体长这样
+### Mac 上报与 Vercel 读取
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.png">
-  <img alt="lyjwpage 运行时架构：上报侧、两份生产、四个 Worker、Apple Music 和浏览器之间的数据流" src="docs/architecture-light.png">
+  <img alt="Mac 直连 ingest Worker，Worker 写 Redis 并推送浏览器，Vercel 读取状态" src="docs/architecture-light.png">
 </picture>
 
-实线是 `/api/*` 上的数据主干，虚线是不走这条主干的几路 —— 图片字节由上报侧直传 R2，
-在线人数和令牌是浏览器、上报器直连 Worker，站点自己去 Apple Music 查目录、取动态封面和歌词。交互版是自包含的一页
+本图聚焦 Mac 上报链路：Mac 的远端上报端点直接配置为
+`https://ingest.homepage.lyjw.llc/api/ingest/mac`。Worker 写 Redis、通过 `/ws` 推送浏览器，
+并调用 Vercel 的 `/api/revalidate`；Vercel 从 Redis 读取状态，提供首屏和状态 API。
+图片仍由 Mac 直传 R2。交互版是自包含的一页
 [`docs/architecture.html`](docs/architecture.html)（GitHub 不渲染 HTML，克隆下来用浏览器打开），
-节点上标着对应的源码位置，还能按上报入库 / 两份生产互转 / 浏览器三条腿 / 在线人数反馈环 /
-图片直传 R2 五条线索分别看；图由 `docs/architecture.json` 生成，改了拓扑两边一起改。
+节点上标着对应的源码位置，可按上报写入、页面读取、实时更新分别查看。
+图由 `docs/architecture.json` 生成，改了拓扑两边一起改。
 
 ## 状态是怎么接的
 

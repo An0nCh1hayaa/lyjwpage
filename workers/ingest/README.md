@@ -100,7 +100,9 @@
 5. 验证 Vercel 的上报实际到达 Worker、Redis 已更新、缓存失效与 WebSocket 推送均正常。
    EdgeOne 的入口、环境变量及国内推送房间保持原配置；后续单独迁移国内侧。
 
-上报器也可以直接使用 Worker 的源，省去 Vercel 路由层转交；这不是本次切流的前置条件。
+上报器应直接使用 Worker 的源。Mac Telemetry Hub 在「设置 → 远端上报」中将上报端点
+配置为 `https://ingest.homepage.lyjw.llc/api/ingest/mac`，保存后立即生效，Bearer 沿用原值。
+本机配置已切换并验证真实上报返回 202。Vercel rewrite 目前仍承接尚未迁移的其他入口流量。
 `live.homepage.lyjw.llc` 也绑定到 ingest，和新域名进入同一房间；上报器原有的
 `LIVE_PUSH_URL` 继续获得同一个 `/count`。完成验证后可删除旧 `live-push` Worker，
 其旧 WebSocket 断开后会按原地址重连到新房间；国内推送服务不在本次变更内。
