@@ -13,7 +13,9 @@ export function WebPlayerProvider({ children }: { children: ReactNode }) {
   return (
     <WebPlayerContext.Provider value={player}>
       {children}
-      {player.open && player.item ? <WebPlayerDialog player={player} /> : null}
+      {player.open && player.item ? (
+        <WebPlayerDialog key={player.item.id} player={player} />
+      ) : null}
     </WebPlayerContext.Provider>
   );
 }

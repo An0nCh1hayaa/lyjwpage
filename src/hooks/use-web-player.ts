@@ -11,7 +11,12 @@ import {
   type MusicKitInstance,
 } from "@/lib/musickit";
 import type { ListeningItem } from "@/lib/types";
-import { queueOptionsFor } from "@/lib/web-player";
+import {
+  getCachedPlaylist,
+  queueOptionsFor,
+  resolveVisibleQueue,
+  setCachedPlaylist,
+} from "@/lib/web-player";
 
 export type WebPlayerStatus =
   | "unavailable" // 没配 MUSICKIT_TOKEN_ENDPOINT，功能整体不可用
@@ -113,6 +118,7 @@ export function useWebPlayerState(): WebPlayer {
   const [queue, setQueue] = useState<MediaItem[]>([]);
   const [active, setActive] = useState(false);
   const [instance, setInstance] = useState<MusicKitInstance | null>(null);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
 
   const instanceRef = useRef<MusicKitInstance | null>(null);
   const itemRef = useRef<ListeningItem | null>(null);
@@ -190,14 +196,23 @@ export function useWebPlayerState(): WebPlayer {
       // 一张专辑，最后一首放完就该停，不要让 MusicKit 接着放 Apple 推荐的东西
       inst.autoplayEnabled = false;
       await mkSafe(() => inst.setQueue(options));
-      loadedIdRef.current = targetItem.id;
-      setQueue(inst.queue?.items ?? []);
-      setNowPlaying(inst.nowPlayingItem ?? null);
-      setStatus("ready");
+      // 避免慢网络下旧请求后发先至覆盖用户刚切换的新目标
+      if (itemRef.current?.id === targetItem.id) {
+        const items = inst.queue?.items ?? [];
+        setCachedPlaylist(targetItem.id, items);
+        loadedIdRef.current = targetItem.id;
+        setLoadedId(targetItem.id);
+        setQueue(items);
+        setNowPlaying(inst.nowPlayingItem ?? null);
+        setStatus("ready");
+      }
     } catch (err) {
-      loadedIdRef.current = null;
-      setError(describe(err));
-      setStatus("error");
+      if (itemRef.current?.id === targetItem.id) {
+        loadedIdRef.current = null;
+        setLoadedId(null);
+        setError(describe(err));
+        setStatus("error");
+      }
     }
   }, []);
 
@@ -211,10 +226,11 @@ export function useWebPlayerState(): WebPlayer {
     setActive(false);
     activeRef.current = false;
     loadedIdRef.current = null;
+    setLoadedId(null);
     setPlaybackState(PLAYBACK_STATE.none);
     setQueue([]);
     setNowPlaying(null);
-    setStatus("idle");
+    setStatus(openRef.current ? "starting" : "idle");
     const inst = instanceRef.current;
     if (!inst) return;
     void runExclusive(async () => {
@@ -229,6 +245,9 @@ export function useWebPlayerState(): WebPlayer {
    * 「看看这张」，要不要出声由卡片里的播放键决定。换成另一张时把正在放的停掉：
    * 播放器一次只认一张专辑，弹窗上写着新专辑、喇叭里放着旧的，会对不上。
    *
+   * 若之前已拿过歌单列表有缓存，在打开弹窗前就直接预设好列表，并配合 Dialog
+   * 预先算好像素高度，消除弹窗打开时的高度跳动；无缓存且非当前专辑时清空旧数据。
+   *
    * MusicKit 那几百 KB 的脚本从这里开始拉：访客点开一张专辑就是要看曲目，
    * 列表只能从 MusicKit 的队列里来。
    */
@@ -236,20 +255,53 @@ export function useWebPlayerState(): WebPlayer {
     (targetItem: ListeningItem) => {
       const previousItem = itemRef.current;
       const switching = Boolean(previousItem && previousItem.id !== targetItem.id);
+      const isLoaded = loadedIdRef.current === targetItem.id;
+      const playable = queueOptionsFor(targetItem) !== null;
+      const cached = getCachedPlaylist(targetItem.id);
+
       setItem(targetItem);
       itemRef.current = targetItem;
       setOpen(true);
       openRef.current = true;
       setError(null);
-      if (activeRef.current && switching) {
-        // stop 自己会在链里把新专辑（itemRef 已经换过）重新装回去
-        stop();
-        return;
+
+      // 若之前拿过歌单有缓存，弹窗打开前直接载入，消除弹窗首帧跳动与骨架屏闪烁
+      if (cached && cached.length > 0) {
+        loadedIdRef.current = targetItem.id;
+        setLoadedId(targetItem.id);
+        setQueue(cached);
+        setNowPlaying(cached[0] ?? null);
+        setStatus("ready");
+      } else if (!isLoaded) {
+        loadedIdRef.current = null;
+        setLoadedId(null);
+        setQueue([]);
+        setNowPlaying(null);
+        setStatus(playable ? "starting" : "idle");
       }
-      if (!queueOptionsFor(targetItem)) return;
+
+      const wasActive = activeRef.current;
+      if (wasActive && switching) {
+        setActive(false);
+        activeRef.current = false;
+        setPlaybackState(PLAYBACK_STATE.none);
+      }
+
+      if (!playable) return;
+
       void runExclusive(async () => {
-        if (loadedIdRef.current === targetItem.id && instanceRef.current) return;
-        setStatus("starting");
+        // 若实例已装载好该专辑且曲目存在，无需重新请求
+        if (
+          loadedIdRef.current === targetItem.id &&
+          instanceRef.current?.queue?.items?.length
+        ) {
+          return;
+        }
+
+        // 无缓存时才展示 starting 占位；已有缓存展示时避免被打回 starting
+        if (!cached || cached.length === 0) {
+          setStatus("starting");
+        }
         setError(null);
         let inst: MusicKitInstance;
         try {
@@ -259,13 +311,23 @@ export function useWebPlayerState(): WebPlayer {
           setStatus("error");
           return;
         }
+
+        if (wasActive && switching) {
+          await inst.stop().catch(() => {});
+        }
+
         // 等脚本的这几秒里访客可能已经点了别的专辑：装那张，别装过时的这张
         const latest = itemRef.current ?? targetItem;
-        if (loadedIdRef.current === latest.id) return;
+        if (
+          loadedIdRef.current === latest.id &&
+          instanceRef.current?.queue?.items?.length
+        ) {
+          return;
+        }
         await prepare(inst, latest);
       });
     },
-    [getOrReuseMusicKit, prepare, runExclusive, stop],
+    [getOrReuseMusicKit, prepare, runExclusive],
   );
 
   const openDialog = useCallback(() => setOpen(true), []);
@@ -401,10 +463,14 @@ export function useWebPlayerState(): WebPlayer {
       setPlaybackState(inst.playbackState);
     };
     const onNowPlaying = () => {
-      setNowPlaying(inst.nowPlayingItem ?? null);
+      if (loadedIdRef.current && loadedIdRef.current === itemRef.current?.id) {
+        setNowPlaying(inst.nowPlayingItem ?? null);
+      }
     };
     const onQueue = () => {
-      setQueue(inst.queue?.items ?? []);
+      if (loadedIdRef.current && loadedIdRef.current === itemRef.current?.id) {
+        setQueue(inst.queue?.items ?? []);
+      }
     };
     const onAuth = () => {
       const isAuth = inst.isAuthorized;
@@ -436,6 +502,9 @@ export function useWebPlayerState(): WebPlayer {
     };
   }, []);
 
+  const visibleQueue = resolveVisibleQueue(loadedId, item?.id, queue);
+  const visibleNowPlaying = resolveVisibleQueue(loadedId, item?.id, [nowPlaying])[0] ?? null;
+
   return useMemo<WebPlayer>(
     () => ({
       status,
@@ -444,8 +513,8 @@ export function useWebPlayerState(): WebPlayer {
       item,
       open,
       playbackState,
-      nowPlaying,
-      queue,
+      nowPlaying: visibleNowPlaying,
+      queue: visibleQueue,
       active,
       instance,
       openWith,
@@ -469,8 +538,8 @@ export function useWebPlayerState(): WebPlayer {
       item,
       open,
       playbackState,
-      nowPlaying,
-      queue,
+      visibleNowPlaying,
+      visibleQueue,
       active,
       instance,
       openWith,

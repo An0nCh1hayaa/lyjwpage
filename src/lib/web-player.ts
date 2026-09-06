@@ -1,5 +1,36 @@
-import type { QueueOptions } from "@/lib/musickit";
+import type { MediaItem, QueueOptions } from "@/lib/musickit";
 import type { ListeningItem } from "@/lib/types";
+
+export const PLAYLIST_ROW_HEIGHT_PX = 32;
+export const PLAYLIST_MAX_HEIGHT_PX = 224; // 14rem (max-h-56)
+
+/**
+ * 会话期间的歌单缓存：key 为专辑/歌单 ID，value 为曲目列表。
+ * 用户切换不同专辑时保留已拿到的曲目，再次打开时直接命中缓存秒开，并在打开前计算好高度，避免高度跳动。
+ */
+const playlistCache = new Map<string, MediaItem[]>();
+
+export function getCachedPlaylist(id: string | null | undefined): MediaItem[] | undefined {
+  if (!id) return undefined;
+  return playlistCache.get(id);
+}
+
+export function setCachedPlaylist(id: string, items: MediaItem[]): void {
+  if (!id || items.length === 0) return;
+  playlistCache.set(id, items);
+}
+
+export function clearPlaylistCache(): void {
+  playlistCache.clear();
+}
+
+/**
+ * 根据曲目数量计算歌单列表容器的目标高度。
+ */
+export function computePlaylistHeight(itemCount: number): number {
+  if (itemCount <= 0) return 0;
+  return Math.min(PLAYLIST_MAX_HEIGHT_PX, itemCount * PLAYLIST_ROW_HEIGHT_PX);
+}
 
 /**
  * 把「最近在听」的一个条目变成 MusicKit `setQueue` 的参数。
@@ -51,4 +82,19 @@ export function formatClock(milliseconds: number): string {
   }
 
   return `${minutes}:${secondsStr}`;
+}
+
+/**
+ * 仅当当前装载完成的专辑 ID 与目标条目 ID 一致时，才认为队列有效。
+ * 用于防止在切换专辑或装载期间，旧专辑的播放列表和当前曲目遗留在弹窗中。
+ */
+export function resolveVisibleQueue<T>(
+  loadedAlbumId: string | null | undefined,
+  currentAlbumId: string | null | undefined,
+  queue: T[],
+): T[] {
+  if (!loadedAlbumId || !currentAlbumId || loadedAlbumId !== currentAlbumId) {
+    return [];
+  }
+  return queue;
 }

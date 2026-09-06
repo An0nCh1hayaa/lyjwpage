@@ -10,7 +10,12 @@ import type { WebPlayer } from "@/hooks/use-web-player";
 import { PLAYBACK_STATE } from "@/lib/musickit";
 import { catalogItemId } from "@/lib/playing-queue";
 import { cn } from "@/lib/utils";
-import { formatClock, queueOptionsFor } from "@/lib/web-player";
+import {
+  computePlaylistHeight,
+  formatClock,
+  PLAYLIST_MAX_HEIGHT_PX,
+  queueOptionsFor,
+} from "@/lib/web-player";
 
 /** 滑块上会改值的键。松开这些才 seek，别的键（Tab / Escape）路过不算 */
 const SEEK_KEYS = new Set([
@@ -189,50 +194,68 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
               </>
             )}
 
-            {/* 队列登录前就显示：打开卡片那一刻就在装，见 use-web-player */}
-            <div className="mt-3 max-h-56 overflow-y-auto border-t border-line">
-              {player.queue.length === 0 ? (
-                isStarting ? (
-                  <div className="space-y-2 py-2" aria-hidden>
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className="flex animate-pulse items-center gap-2 px-1 py-1.5">
-                        <div className="h-3.5 w-5 rounded bg-muted" />
-                        <div className="h-3.5 flex-1 rounded bg-muted" />
-                        <div className="h-3.5 w-8 rounded bg-muted" />
+            {/* 队列登录前就显示：有缓存或已装载时，打开弹窗前就计算好高度，防止跳动 */}
+            {(() => {
+              const count = player.queue.length;
+              const hasQueue = count > 0;
+              const targetHeight = hasQueue
+                ? computePlaylistHeight(count)
+                : isStarting
+                  ? PLAYLIST_MAX_HEIGHT_PX
+                  : undefined;
+
+              return (
+                <div
+                  className="mt-3 max-h-56 overflow-y-auto border-t border-line"
+                  style={targetHeight != null ? { height: `${targetHeight}px` } : undefined}
+                >
+                  {!hasQueue ? (
+                    isStarting ? (
+                      <div aria-hidden>
+                        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                          <div
+                            key={i}
+                            className="flex h-8 animate-pulse items-center gap-2 px-1 py-1.5"
+                          >
+                            <div className="h-3.5 w-5 rounded bg-muted" />
+                            <div className="h-3.5 flex-1 rounded bg-muted" />
+                            <div className="h-3.5 w-8 rounded bg-muted" />
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                ) : null
-              ) : (
-                player.queue.map((song, index) => {
-                  const isCurrent =
-                    catalogItemId(song.id) === catalogItemId(player.nowPlaying?.id);
-                  return (
-                    <button
-                      key={song.id ?? index}
-                      type="button"
-                      onClick={() => player.playAt(index)}
-                      className="flex w-full items-center gap-2 px-1 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover"
-                    >
-                      <span className="label-mono w-5 shrink-0 text-muted-foreground">
-                        {index + 1}
-                      </span>
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate",
-                          isCurrent && "font-medium text-live",
-                        )}
-                      >
-                        {song.attributes?.name ?? "未知曲目"}
-                      </span>
-                      <span className="label-mono shrink-0 text-muted-foreground">
-                        {formatClock(song.attributes?.durationInMillis ?? 0)}
-                      </span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
+                    ) : null
+                  ) : (
+                    player.queue.map((song, index) => {
+                      const isCurrent =
+                        catalogItemId(song.id) === catalogItemId(player.nowPlaying?.id);
+                      return (
+                        <button
+                          key={song.id ?? index}
+                          type="button"
+                          onClick={() => player.playAt(index)}
+                          className="flex h-8 w-full items-center gap-2 px-1 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover"
+                        >
+                          <span className="label-mono w-5 shrink-0 text-muted-foreground">
+                            {index + 1}
+                          </span>
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate",
+                              isCurrent && "font-medium text-live",
+                            )}
+                          >
+                            {song.attributes?.name ?? "未知曲目"}
+                          </span>
+                          <span className="label-mono shrink-0 text-muted-foreground">
+                            {formatClock(song.attributes?.durationInMillis ?? 0)}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })()}
           </>
         )}
 
