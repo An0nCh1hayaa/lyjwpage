@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ExternalLink, Pause, Play, SkipBack, SkipForward, X } from "lucide-react";
 
 import { DialogButton } from "@/components/live/listen-along-button";
@@ -41,7 +41,11 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
   const titleId = useId();
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
+  const [, setIsDragging] = useState(false);
+
+  const isDraggingRef = useRef(false);
+  const seekingTargetMsRef = useRef<number | null>(null);
+  const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const item = player.item;
   const isStarting = player.status === "starting";
@@ -50,18 +54,75 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
   /** 未授权时放的是 30 秒试听，进度那一行要标出来 */
   const previewing = !player.authorized;
 
+  useEffect(() => {
+    return () => {
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * 提交 seek 并保持乐观显示：
+   * 在底层音频引擎真正跳转并开始回报新位置前，锁定在目标位置，防止放手瞬间旧时间残影把滑块拽回去。
+   */
+  const commitSeek = useCallback(
+    (targetMs: number) => {
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      seekingTargetMsRef.current = targetMs;
+      setPositionMs(targetMs);
+
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
+      }
+      seekTimeoutRef.current = setTimeout(() => {
+        seekingTargetMsRef.current = null;
+      }, 2500);
+
+      void player.seekTo(targetMs).finally(() => {
+        const inst = player.instance;
+        if (inst && !isDraggingRef.current) {
+          const currentMs = Math.max(0, (inst.currentPlaybackTime || 0) * 1000);
+          if (
+            seekingTargetMsRef.current === targetMs &&
+            Math.abs(currentMs - targetMs) <= 1500
+          ) {
+            seekingTargetMsRef.current = null;
+            setPositionMs(currentMs);
+          }
+        }
+      });
+    },
+    [player],
+  );
+
   /**
    * 进度在这里自己订阅，不进 Provider 的状态：playbackTimeDidChange 每秒一次，
    * 放进 context 会让页头和整张卡片跟着每秒重渲染。
+   *
+   * 依赖项不含 isDragging，避免拖动开始和结束时频繁注销/重挂载并在首帧触发 onTime 覆盖新位置。
    */
   useEffect(() => {
     const inst = player.instance;
     if (!inst) return;
 
     const onTime = () => {
-      if (!isDragging) {
-        setPositionMs(Math.max(0, (inst.currentPlaybackTime || 0) * 1000));
+      if (isDraggingRef.current) return;
+
+      const currentMs = Math.max(0, (inst.currentPlaybackTime || 0) * 1000);
+      const targetMs = seekingTargetMsRef.current;
+
+      if (targetMs !== null) {
+        // 正在等待 seek 生效：若底层回报与目标差距大于 1.5 秒，说明仍是跳转前旧时间，坚决不覆盖
+        if (Math.abs(currentMs - targetMs) > 1500) {
+          return;
+        }
+        seekingTargetMsRef.current = null;
       }
+
+      setPositionMs(currentMs);
+
       const dur = (inst.currentPlaybackDuration || 0) * 1000;
       if (dur > 0) {
         setDurationMs(dur);
@@ -75,7 +136,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
     return () => {
       inst.removeEventListener("playbackTimeDidChange", onTime);
     };
-  }, [player.instance, player.nowPlaying, isDragging]);
+  }, [player.instance, player.nowPlaying]);
 
   return (
     <Modal titleId={titleId} onClose={player.closeDialog} className="max-w-md">
@@ -138,20 +199,26 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
                 max={durationMs > 0 ? durationMs : 1000}
                 step={1000}
                 value={Math.min(positionMs, durationMs > 0 ? durationMs : 1000)}
+                onPointerDown={() => {
+                  isDraggingRef.current = true;
+                  setIsDragging(true);
+                }}
                 onChange={(e) => {
+                  isDraggingRef.current = true;
                   setIsDragging(true);
                   setPositionMs(Number(e.target.value));
                 }}
                 onPointerUp={(e) => {
-                  setIsDragging(false);
-                  player.seekTo(Number((e.target as HTMLInputElement).value));
+                  commitSeek(Number((e.target as HTMLInputElement).value));
+                }}
+                onPointerCancel={(e) => {
+                  commitSeek(Number((e.target as HTMLInputElement).value));
                 }}
                 onKeyUp={(e) => {
                   // 只认真的在挪滑块的键：Tab 走开、Escape 关窗也会经过这里，
                   // 那时 seek 一下等于把正在放的歌拽回滑块当前的整秒
                   if (!SEEK_KEYS.has(e.key)) return;
-                  setIsDragging(false);
-                  player.seekTo(Number((e.target as HTMLInputElement).value));
+                  commitSeek(Number((e.target as HTMLInputElement).value));
                 }}
                 className="w-full cursor-pointer accent-live"
               />

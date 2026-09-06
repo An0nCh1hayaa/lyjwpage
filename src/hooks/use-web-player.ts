@@ -55,7 +55,7 @@ export type WebPlayer = {
   next: () => void;
   previous: () => void;
   /** 毫秒 */
-  seekTo: (ms: number) => void;
+  seekTo: (ms: number) => Promise<void>;
   /** 切到队列里第 index 首 */
   playAt: (index: number) => void;
   /** 停止并清队列；item 保留（弹窗还能再点播放），active 变 false */
@@ -166,6 +166,13 @@ export function useWebPlayerState(): WebPlayer {
     const inst = await getMusicKit();
     instanceRef.current = inst;
     setInstance(inst);
+    /*
+     * 拿到手就对一次授权状态：MusicKit 把用户令牌存在本地，之前在「一起听」
+     * 或上次访问登录过的话，configure 完 isAuthorized 直接是 true —— 事件
+     * authorizationStatusDidChange 只在**变化**时来，初始值得自己读，否则登录
+     * 过的访客打开播放器仍被画成试听。
+     */
+    setAuthorized(inst.isAuthorized);
     return inst;
   }, []);
 
@@ -430,8 +437,8 @@ export function useWebPlayerState(): WebPlayer {
   }, [runExclusive]);
 
   const seekTo = useCallback(
-    (ms: number) => {
-      void runExclusive(async () => {
+    (ms: number): Promise<void> => {
+      return runExclusive(async () => {
         const inst = instanceRef.current;
         if (!inst) return;
         await mkSafe(() => inst.seekToTime(ms / 1000));
