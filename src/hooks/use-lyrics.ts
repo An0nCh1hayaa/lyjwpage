@@ -19,7 +19,7 @@ import type { LyricLine } from "@/lib/lyrics-ttml";
 const LYRICS_ENDPOINT = "/api/lyrics";
 /**
  * 响应形状的版本，拼进查询串。路由不看它，它只是浏览器缓存的键的一部分：
- * 带参的响应允许浏览器留 7 天（`Cache-Control: private`），形状变了而 URL 不变
+ * 带参的响应允许浏览器和 CDN 留 7 天，形状变了而 URL 不变
  * 的话，之前来过的访客整整一周拿到的都是旧形状。改了 LyricsResult 的形状就把
  * 这个数加一。v4：响应多了 songId（09-03 到 09-07 之间不传参那版留下的 v3 缓存
  * 没有它，对号会永远失败）。

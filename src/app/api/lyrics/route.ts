@@ -9,9 +9,11 @@ import { withRedisScope } from "@/lib/redis";
  *
  * 两种问法：
  * - 带 `song`：答那一首。网页播放器用 —— 访客在自己那边放专辑里任意一首，
- *   服务端的「此刻在播」快照说的是主人的歌，帮不上他。响应按 URL 可缓存
- *   （`private`，只许这一个浏览器留，不进 CDN：这是拿我的订阅身份换来的整首
- *   正文，共享缓存会把一次放行的响应原样发给之后任何人）。
+ *   服务端的「此刻在播」快照说的是主人的歌，帮不上他。一首歌的歌词不会变，
+ *   响应按 URL 缓存：有词 7 天、没有 1 小时（和 lib/lyrics 里 Redis 那两档同一
+ *   尺度），`public` + `s-maxage` 让 CDN 也存 —— 从前这里是 `private`，因为
+ *   白名单是每次现查的，CDN 会把一次放行的响应原样发给之后任何人；白名单
+ *   没了，这个顾虑也就没了。
  * - 不带：站点按此刻在播那首自己决定去取哪首（卡片 hero 用），响应随时间变、
  *   不随 URL 变，一律 `no-store`。快照说 `hasLyrics` 为 false 时直接答空 ——
  *   目录已经说了没有，问 amp-api 也是 404，还会占一条「没有」的缓存。
@@ -52,7 +54,6 @@ export async function GET(request: Request) {
     }
     try {
       const result = await withRedisScope(() => resolveLyrics(requested));
-      // 有词 7 天、没有 1 小时，和 lib/lyrics 里 Redis 那两档同一个尺度
       return jsonResponse(
         { songId: requested, ...result },
         200,
@@ -87,9 +88,10 @@ function jsonResponse(data: LyricsNowResponse, status = 200, cacheTtl = 0): Resp
   return Response.json(data, {
     status,
     headers: {
-      // private：只许这一个浏览器留，共享缓存（CDN、代理）一律不存，理由见文件头
       "Cache-Control":
-        cacheTtl > 0 ? `private, max-age=${cacheTtl}` : "no-store, no-cache, must-revalidate",
+        cacheTtl > 0
+          ? `public, max-age=${cacheTtl}, s-maxage=${cacheTtl}`
+          : "no-store, no-cache, must-revalidate",
     },
   });
 }
