@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useId, useState } from "react";
 import { CircleStop, Headphones, TriangleAlert, X } from "lucide-react";
 
+import { Modal } from "@/components/ui/modal";
 import type { ListenAlong } from "@/hooks/use-listen-along";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +47,7 @@ function face(listen: ListenAlong) {
   };
 }
 
-function DialogButton({
+export function DialogButton({
   children,
   onClick,
   disabled,
@@ -77,132 +77,67 @@ function ListenAlongDialog({
 }) {
   const titleId = useId();
   const busy = listen.status === "starting";
-  const panelRef = useRef<HTMLDivElement>(null);
 
-  /**
-   * 打开时把焦点接进来、关掉时还回去，中间 Tab 不许走出对话框。
-   *
-   * `aria-modal="true"` 只管读屏的虚拟光标，键盘的 Tab 照样能落到背后的卡片
-   * 链接上 —— 何况这个对话框是 createPortal 到 body 的，DOM 顺序上就在最后，
-   * 走出去之后再也 Tab 不回来。
-   */
-  useEffect(() => {
-    const panel = panelRef.current;
-    // 焦点先给容器而不是第一个按钮：starting 时按钮是 disabled 的，聚不上去
-    const restoreTo = document.activeElement as HTMLElement | null;
-    panel?.focus();
-
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab" || !panel) return;
-      const items = Array.from(
-        panel.querySelectorAll<HTMLElement>("button:not([disabled])"),
-      );
-      const active = document.activeElement;
-      const inside = panel.contains(active);
-      if (items.length === 0) {
-        // 全 disabled（连接中）：把焦点按在容器上，Tab 也别溜出去
-        event.preventDefault();
-        panel.focus();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && (!inside || active === first || active === panel)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (!inside || active === last)) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previous;
-      // 不还回去的话焦点会掉到 <body>，键盘用户要从页首重新 Tab 一遍
-      restoreTo?.focus?.();
-    };
-  }, [onClose]);
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* 遮罩只是「点外面关掉」的鼠标热区：它不该是第二个叫 Close 的按钮，
-          可访问的关闭入口留给头部那个 X 和 Escape */}
-      <div className="absolute inset-0 bg-background/80" aria-hidden onClick={onClose} />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className="relative w-full max-w-sm bg-surface pt-3 outline-none"
-      >
-        <header className="flex items-center justify-between gap-2 px-4">
-          <div className="flex items-center gap-1.5">
-            <span id={titleId} className="label-mono text-muted-foreground">
-              Listen Along
-            </span>
-            <span className="label-mono text-muted-foreground/60">beta</span>
-          </div>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-3.5" aria-hidden />
-          </button>
-        </header>
-        <p className="mt-3 px-4 text-sm leading-relaxed text-foreground">
-          请登录有效的 Apple Music 订阅授权。站点不转发音频、储存凭据，仅同步播放曲目和进度。
-        </p>
-        {listen.error ? (
-          <p className="mt-2 px-4 text-sm text-muted-foreground">{listen.error}</p>
-        ) : null}
-        <div className="mt-4 flex border-t border-line">
-          <DialogButton
-            disabled={busy}
-            onClick={() => {
-              if (listen.status === "following") {
-                listen.stop();
-                onClose();
-                return;
-              }
-              listen.start();
-            }}
-          >
-            {busy
-              ? "Connecting..."
-              : listen.status === "following"
-                ? "Stop"
-                : listen.authorized
-                  ? "Start"
-                  : "Sign in"}
-          </DialogButton>
-          {listen.authorized ? (
-            <>
-              <div className="w-px self-stretch bg-line" aria-hidden />
-              <DialogButton
-                disabled={busy}
-                onClick={() => {
-                  listen.logout();
-                  onClose();
-                }}
-              >
-                Sign out
-              </DialogButton>
-            </>
-          ) : null}
+  return (
+    <Modal titleId={titleId} onClose={onClose}>
+      <header className="flex items-center justify-between gap-2 px-4">
+        <div className="flex items-center gap-1.5">
+          <span id={titleId} className="label-mono text-muted-foreground">
+            Listen Along
+          </span>
+          <span className="label-mono text-muted-foreground/60">beta</span>
         </div>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
+      </header>
+      <p className="mt-3 px-4 text-sm leading-relaxed text-foreground">
+        请登录有效的 Apple Music 订阅授权。站点不转发音频、储存凭据，仅同步播放曲目和进度。
+      </p>
+      {listen.error ? (
+        <p className="mt-2 px-4 text-sm text-muted-foreground">{listen.error}</p>
+      ) : null}
+      <div className="mt-4 flex border-t border-line">
+        <DialogButton
+          disabled={busy}
+          onClick={() => {
+            if (listen.status === "following") {
+              listen.stop();
+              onClose();
+              return;
+            }
+            listen.start();
+          }}
+        >
+          {busy
+            ? "Connecting..."
+            : listen.status === "following"
+              ? "Stop"
+              : listen.authorized
+                ? "Start"
+                : "Sign in"}
+        </DialogButton>
+        {listen.authorized ? (
+          <>
+            <div className="w-px self-stretch bg-line" aria-hidden />
+            <DialogButton
+              disabled={busy}
+              onClick={() => {
+                listen.logout();
+                onClose();
+              }}
+            >
+              Sign out
+            </DialogButton>
+          </>
+        ) : null}
       </div>
-    </div>,
-    document.body,
+    </Modal>
   );
 }
 

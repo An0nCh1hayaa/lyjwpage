@@ -57,6 +57,30 @@ export function applyRepeatMode(music: MusicKitInstance, repeatOne: boolean) {
   if ("autoplayEnabled" in music) music.autoplayEnabled = !repeatOne;
 }
 
+/** 队列条目上用得到的属性。Apple 没发布类型包，按官方文档手写 */
+export type MediaItemAttributes = {
+  name?: string;
+  artistName?: string;
+  albumName?: string;
+  /** 毫秒 */
+  durationInMillis?: number;
+  /** 模板 URL，尺寸由取图的一侧填，见 lib/apple-artwork */
+  artwork?: { url?: string };
+  url?: string;
+};
+export type MediaItem = { id?: string; attributes?: MediaItemAttributes };
+/** setQueue 接受的几种形态，只列用到的。startTime 被否决（见下面接口上的注释），别加回来 */
+export type QueueOptions = {
+  song?: string;
+  album?: string;
+  playlist?: string;
+  station?: string;
+  /** Apple Music 网页地址，专辑 / 歌单 / 电台都认 */
+  url?: string;
+  /** 队列装好就开始放 */
+  startPlaying?: boolean;
+};
+
 /** 用到的那部分 MusicKit 实例接口。Apple 没发布类型包，按官方文档手写 */
 export type MusicKitInstance = {
   isAuthorized: boolean;
@@ -64,10 +88,12 @@ export type MusicKitInstance = {
   playbackState: number;
   /** 播放进度，**秒**（站点内部一律毫秒，边界在 use-listen-along 里换算） */
   currentPlaybackTime: number;
+  /** 当前曲总长，**秒**，和 currentPlaybackTime 同一个单位 */
+  currentPlaybackDuration: number;
   /** 0–1 */
   volume: number;
-  nowPlayingItem: { id?: string } | null;
-  queue?: { items?: Array<{ id?: string }> };
+  nowPlayingItem: MediaItem | null;
+  queue?: { items?: MediaItem[] };
   /** 队列里有下一首时让它自己接着播。单曲循环时要关掉，否则会去接下首 */
   autoplayEnabled?: boolean;
   /** 见 REPEAT_MODE。单曲循环是 one，跟听平时是 none */
@@ -79,10 +105,11 @@ export type MusicKitInstance = {
    * startTime 是被否决的 seek 起播方案（换歌一律从 0 走，见 use-listen-along），
    * 别把它标回接口上邀请人用回去。
    */
-  setQueue(options: { song?: string }): Promise<unknown>;
+  setQueue(options: QueueOptions): Promise<unknown>;
   playNext(options: { song?: string }, clear?: boolean): Promise<unknown>;
   playLater(options: { song?: string }): Promise<unknown>;
   skipToNextItem(): Promise<void>;
+  skipToPreviousItem(): Promise<void>;
   changeToMediaAtIndex(index: number): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
@@ -240,8 +267,9 @@ export function getMusicKit(): Promise<MusicKitInstance> {
    * 跟听就断在那里。清掉重来会走一遍 fetchDeveloperToken，它自己会看出手上那份
    * 该换了。
    *
-   * 只有 start() 会调到这里，那时一定没在放（在放的话按钮是「跟听中」，点了走的
-   * 是 stop），所以重配不会打断谁。
+   * 两个调用方都保证调到这里时没在放：「一起听」只在 start() 调（在放的话按钮是
+   * 「跟听中」，点了走的是 stop）；网页播放器（hooks/use-web-player）手里的实例
+   * 还在放时直接复用、不再来要，见那边的 getOrReuseMusicKit。所以重配不会打断谁。
    */
   if (instancePromise && cachedToken && pastHalfLife(cachedToken, nowSeconds())) {
     instancePromise = null;

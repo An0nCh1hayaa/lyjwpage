@@ -1,5 +1,6 @@
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
+import { WebPlayerProvider } from "@/components/web-player/web-player-provider";
 import { ContactCard } from "@/components/contact-card";
 import { ActivityCard } from "@/components/live/activity-card";
 import { LiveMediaPair } from "@/components/live/media-pair";
@@ -103,51 +104,53 @@ export default async function Home() {
 
   return (
     <>
-      <Header desktop={desktop} desktopIconDataUri={desktopIcon} />
+      <WebPlayerProvider>
+        <Header desktop={desktop} desktopIconDataUri={desktopIcon} />
 
-      <main className="flex-1">
-        <div className="mx-auto my-3.5 w-[calc(100%-2rem)] max-w-5xl sm:my-4">
-          <Section id="live" className="p-0 sm:p-0">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <ContactCard
-                avatarDataUri={avatarDataUri}
-                chartFallback={githubChart}
-                yearFallback={vibeCodingYear}
-              />
-              <TimezoneCard fallback={timezone} />
-              <LiveMediaPair
-                chargerFallback={charger}
-                powerBankFallback={powerBank}
-                listeningFallback={listening}
-                nowListeningFallback={nowListening}
-                lyricsFallback={
-                  nowSongId && lyrics && lyrics.lines.length
-                    ? { songId: nowSongId, lines: lyrics.lines, songwriters: lyrics.songwriters }
-                    : null
-                }
-                artworkPlaceholders={artwork}
-              />
-              <ActivityCard fallback={activity} />
-              <ServerCard fallback={server} />
-              <VibeCodingCard fallback={vibeCoding} />
-            </div>
-
-            <PlaystationBlock
-              trophies={trophies}
-              playing={playing}
-              playingNow={playingNow}
-            />
-
-            <div id="watching" className="mt-6 scroll-mt-28 border-t border-line pt-5">
-              <div className="mb-3 flex items-baseline justify-between">
-                <h3 className="text-sm font-medium">最近在看</h3>
-                <span className="label-mono text-muted-foreground">Emby</span>
+        <main className="flex-1">
+          <div className="mx-auto my-3.5 w-[calc(100%-2rem)] max-w-5xl sm:my-4">
+            <Section id="live" className="p-0 sm:p-0">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <ContactCard
+                  avatarDataUri={avatarDataUri}
+                  chartFallback={githubChart}
+                  yearFallback={vibeCodingYear}
+                />
+                <TimezoneCard fallback={timezone} />
+                <LiveMediaPair
+                  chargerFallback={charger}
+                  powerBankFallback={powerBank}
+                  listeningFallback={listening}
+                  nowListeningFallback={nowListening}
+                  lyricsFallback={
+                    nowSongId && lyrics && lyrics.lines.length
+                      ? { songId: nowSongId, lines: lyrics.lines, songwriters: lyrics.songwriters }
+                      : null
+                  }
+                  artworkPlaceholders={artwork}
+                />
+                <ActivityCard fallback={activity} />
+                <ServerCard fallback={server} />
+                <VibeCodingCard fallback={vibeCoding} />
               </div>
-              <WatchingRow fallback={watching} nowFallback={nowWatching} />
-            </div>
-          </Section>
-        </div>
-      </main>
+
+              <PlaystationBlock
+                trophies={trophies}
+                playing={playing}
+                playingNow={playingNow}
+              />
+
+              <div id="watching" className="mt-6 scroll-mt-28 border-t border-line pt-5">
+                <div className="mb-3 flex items-baseline justify-between">
+                  <h3 className="text-sm font-medium">最近在看</h3>
+                  <span className="label-mono text-muted-foreground">Emby</span>
+                </div>
+                <WatchingRow fallback={watching} nowFallback={nowWatching} />
+              </div>
+            </Section>
+          </div>
+        </main>
+      </WebPlayerProvider>
 
       <Footer />
     </>

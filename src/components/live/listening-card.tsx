@@ -18,6 +18,8 @@ import { Card } from "@/components/ui/card";
 import { HomePodMiniIcon, MacBookProIcon } from "@/components/ui/device-icons";
 import { HeroMotionArtwork } from "@/components/live/hero-motion-artwork";
 import { ListenAlongButton } from "@/components/live/listen-along-button";
+import { PlayerArtworkPreload } from "@/components/web-player/player-artwork";
+import { useWebPlayer } from "@/components/web-player/web-player-provider";
 import { useListenAlong } from "@/hooks/use-listen-along";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import { useLyrics, type LyricsFallback } from "@/hooks/use-lyrics";
@@ -46,6 +48,7 @@ import type {
 } from "@/lib/types";
 import { appleArtwork, ARTWORK_SCALE, needsOptimizing } from "@/lib/apple-artwork";
 import type { ArtworkDataUri, ArtworkPlaceholders } from "@/lib/artwork-placeholder";
+import { queueOptionsFor } from "@/lib/web-player";
 import { cn } from "@/lib/utils";
 
 /**
@@ -708,9 +711,11 @@ function HeroLyricsSkeleton() {
 function TrackRow({
   track,
   placeholder,
+  onOpen,
 }: {
   track: ListeningItem;
   placeholder: ArtworkDataUri | undefined;
+  onOpen?: () => void;
 }) {
   const content = (
     <>
@@ -757,6 +762,18 @@ function TrackRow({
   // 高度和吸附交给外层的 motion 包装，这里只管行内布局
   const className =
     "flex h-full items-center gap-2.5 rounded-md px-2 transition-colors hover:bg-surface-hover";
+
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn(className, "w-full text-left")}
+      >
+        {content}
+      </button>
+    );
+  }
 
   return track.link ? (
     <a
@@ -838,14 +855,16 @@ function useRowSnap(topKey: string | undefined, wide: boolean) {
   }, []);
 }
 
-/** 有链接就整块可点，没有就退化成普通容器 */
+/** 有链接或点击打开回调就整块可点，没有就退化成普通容器 */
 function HeroWrapper({
   link,
   wideLyrics = false,
+  onOpen,
   children,
 }: {
   link: string | null;
   wideLyrics?: boolean;
+  onOpen?: () => void;
   children: ReactNode;
 }) {
   // 移动端始终为全宽 flex 排布；仅在桌面端开启宽屏歌词时切换为双列 grid
@@ -853,6 +872,17 @@ function HeroWrapper({
     "group h-full rounded-md",
     wideLyrics ? "flex gap-3 md:grid md:grid-cols-2 md:gap-0" : "flex gap-3",
   );
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn(className, "w-full text-left")}
+      >
+        {children}
+      </button>
+    );
+  }
   return link ? (
     <a
       href={link}
@@ -921,6 +951,7 @@ export function ListeningCard({
     { fallback },
   );
   useLiveEvents();
+  const player = useWebPlayer();
   const { data: live } = useStatus<NowListeningPayload>(NOW_LISTENING_PATH, MUSIC_REFRESH_MS, {
     fallback: nowFallback,
   });
@@ -1031,6 +1062,39 @@ export function ListeningCard({
     songId: resolvedSongId,
     upcomingSongIds: resolvedUpcoming,
   });
+
+  /**
+   * 网页播放器和「一起听」驱动的是同一个 MusicKit 单例，两边只能活一个。
+   *
+   * 交接必须发生在**动手之前**、在同一个点击里：跟听的 stop() 是把 music 置
+   * null，真正的 music.stop() 在那个 effect 的清理里跑，落在这次提交之后 ——
+   * 如果等播放器 active 了再去停跟听，那一记 stop() 会砸在刚装好的队列上，
+   * 专辑刚响就哑。反过来同理：先叫播放器停，再让跟听去 getMusicKit。
+   *
+   * 不可播的条目（没有目录链接）不进播放器，保留原来跳 Apple Music 的行为。
+   */
+  const stopListenAlong = listenAlong.stop;
+  const openInPlayer = useCallback(
+    (item: ListeningItem) => {
+      if (!player) return;
+      stopListenAlong();
+      player.openWith(item);
+    },
+    [player, stopListenAlong],
+  );
+  const canOpenInPlayer = (item: ListeningItem) =>
+    Boolean(player && player.status !== "unavailable" && queueOptionsFor(item));
+  const mutualListenAlong = useMemo(
+    () => ({
+      ...listenAlong,
+      start: () => {
+        player?.stop();
+        listenAlong.start();
+      },
+    }),
+    [listenAlong, player],
+  );
+
   const showListenAlong =
     listenAlong.status !== "unavailable" &&
     (Boolean(localTrack && resolvedSongId) || listenAlong.status !== "idle");
@@ -1084,6 +1148,18 @@ export function ListeningCard({
   );
   // 对重排稳定的 key，否则顶部插入新条目时会被当成整批换新
   const restKeys = stableKeys(rest.map((item) => item.id));
+  /**
+   * 能进播放器的那几张封面，按弹窗和缩略图的尺寸提前拉好（见 PlayerArtworkPreload）：
+   * 点开卡片时封面得已经在那儿，而不是再等一次加载。同一张封面出现多次
+   * （hero 和列表）只算一次。
+   */
+  const preloadArtworks = Array.from(
+    new Set(
+      [latest, ...rest].flatMap((entry) =>
+        entry?.artwork && canOpenInPlayer(entry) ? [entry.artwork] : [],
+      ),
+    ),
+  );
   const listRef = useRowSnap(restKeys[0], wide);
 
   /**
@@ -1113,7 +1189,7 @@ export function ListeningCard({
   return (
     <Card
       label="Recently Played"
-      action={showListenAlong ? <ListenAlongButton listen={listenAlong} /> : "Apple Music"}
+      action={showListenAlong ? <ListenAlongButton listen={mutualListenAlong} /> : "Apple Music"}
       className={cn("h-full min-h-93.5", className)}
     >
       <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-3">
@@ -1153,7 +1229,16 @@ export function ListeningCard({
                 // 非对称时长写在 variant 里，这里传统一的 transition 会把它抹平
                 transition={reduced ? STATIC_TRANSITION : undefined}
               >
-                <HeroWrapper link={hero.link} wideLyrics={showSideLyrics}>
+                <HeroWrapper
+                  link={hero.link}
+                  wideLyrics={showSideLyrics}
+                  // 只有历史那一版 hero 进播放器；本机正在放的那首已经有「一起听」
+                  onOpen={
+                    !hero.track && latest && canOpenInPlayer(latest)
+                      ? () => openInPlayer(latest)
+                      : undefined
+                  }
+                >
                   <div className={cn("flex min-w-0 flex-1 gap-3", showSideLyrics && "md:pr-5")}>
                     <HeroMotionArtwork
                       artwork={hero.artwork}
@@ -1384,6 +1469,7 @@ export function ListeningCard({
                               ? artworkPlaceholders.rows[item.artwork]
                               : undefined
                           }
+                          onOpen={canOpenInPlayer(item) ? () => openInPlayer(item) : undefined}
                         />
                       </motion.div>
                     ))}
@@ -1398,6 +1484,7 @@ export function ListeningCard({
           </div>
         </div>
       </div>
+      <PlayerArtworkPreload artworks={preloadArtworks} />
     </Card>
   );
 }

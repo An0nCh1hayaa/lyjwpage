@@ -1,6 +1,7 @@
 import { HeaderDesktop } from "@/components/live/live-desk-card";
 import { HomeLink } from "@/components/home-link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { MiniPlayer } from "@/components/web-player/mini-player";
 import type { DesktopPayload, StatusResponse } from "@/lib/types";
 
 export function Header({
@@ -17,7 +18,8 @@ export function Header({
         <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
           <HomeLink />
           <HeaderDesktop fallback={desktop} iconDataUri={desktopIconDataUri} />
-          <div className="justify-self-end">
+          <div className="flex items-center gap-2 justify-self-end">
+            <MiniPlayer />
             <ThemeToggle />
           </div>
         </div>
