@@ -20,16 +20,11 @@ PSN_ACCOUNT_ID = "me"
 PLAYED_GAMES_LIMIT = "100"
 # 三角洲行动、明日方舟：终末地
 PLAYSTATION_HIDDEN_TITLE_IDS = "PPSA28884_00,PPSA18538_00"
-# 上报直连 ingest Worker，由它负责入库、推送和对端转发。
+# 上报直连 ingest Worker，由它负责入库、推送和对端转发。门定节奏读的也是它的
+# /count（`online` 数「此刻可见」的页面，`connections` 数「开着」的，含后台标签页）。
+# 填源不填路径，和站点侧的 NEXT_PUBLIC_LIVE_PUSH_URL 同一个形状。
 SITE_URL = "https://ingest.homepage.lyjw.llc"
 # SITE_INGEST_URL = "https://ingest.homepage.lyjw.llc/api/ingest/playstation"
-# 门读这两个 worker 的 /count 定节奏。填源不填路径，和站点侧的
-# NEXT_PUBLIC_ONLINE_COUNTER_URL / NEXT_PUBLIC_LIVE_PUSH_URL 同一个形状。
-# online-counter 数「此刻可见」的页面，live-push 数「开着」的（含后台标签页）。
-# 哪个不配，对应那一档就用不上，一路退到 15 分钟的基线节奏。
-# live-push 一份生产一个，这里填的是 Vercel 那一份。
-ONLINE_COUNTER_URL = "https://online.homepage.lyjw.llc"
-LIVE_PUSH_URL = "https://live.homepage.lyjw.llc"
 
 [[kv_namespaces]]
 binding = "STATE"

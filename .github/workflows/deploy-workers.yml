@@ -1,4 +1,4 @@
-# workers/ 下的四个 Cloudflare Worker 不进 Vercel 的构建，从前全靠本机
+# workers/ 下的几个 Cloudflare Worker 不进 Vercel 的构建，从前全靠本机
 # `wrangler deploy`——改了代码忘了部署，线上就一直跑旧的，还要等到坏了才发现。
 # 这里补上 Vercel 那半边：推 main 且某个 worker 目录有改动，就只部署改到的那几个。
 #

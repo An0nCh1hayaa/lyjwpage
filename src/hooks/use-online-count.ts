@@ -4,25 +4,19 @@ import { useEffect } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type { ScopedMutator } from "swr";
 
-import { workerUrl } from "@/lib/worker-url";
+import { onlineSocketUrl } from "@/lib/live-socket";
 
 export const ONLINE_COUNT_KEY = "worker:online-count";
 export const ONLINE_CONNECTED_KEY = "worker:online-connected";
 
-/**
- * 浏览器连的端点。那个 Worker 的 /count 站点不用（只走长连接这条），但它不是
- * 闲置口 —— playstation-reporter 每分钟读它定上报节奏，见那边的 README。
+/*
+ * 连的是 ingest Worker 的 /online/ws（和事件推送同一个源，见 lib/live-socket）。
+ * 那个 Worker 的 /count 站点不用（只走长连接这条），但它不是闲置口 —— 三个上报器
+ * 读它定上报节奏，`online` 那个数就是这条连接的口径，见 workers/ingest/README.md。
+ *
+ * 心跳 30 秒（下面 heartbeatTimer）被 Worker 的清扫阈值手抄了一份
+ * （workers/ingest/src/online-counter.ts 的 HEARTBEAT_INTERVAL_MS），改一边必须改另一边。
  */
-const WS_PATH = "/ws";
-
-/**
- * 只配 Worker 的源，路径在这儿拼 —— 和 live-push、musickit-token 那两个变量一个形状，
- * 规则见 lib/worker-url。必须写成完整的 `process.env.XXX` 字面量，浏览器那侧
- * 是构建时按文本替换的。
- */
-function getOnlineWsUrl(): string | null {
-  return workerUrl(process.env.NEXT_PUBLIC_ONLINE_COUNTER_URL, WS_PATH, { websocket: true });
-}
 
 let socket: WebSocket | null = null;
 let refCount = 0;
@@ -54,7 +48,7 @@ function cleanupSocket() {
 }
 
 function connect(mutate: ScopedMutator) {
-  const url = getOnlineWsUrl();
+  const url = onlineSocketUrl();
   if (!url || typeof window === "undefined") return;
 
   // 切到后台或不可见时不建立连接
@@ -122,7 +116,7 @@ function connect(mutate: ScopedMutator) {
       } catch {}
     };
   } catch (err) {
-    console.error("[online-counter] Failed to connect to WebSocket:", err);
+    console.error("[online] Failed to connect to WebSocket:", err);
     void mutate(ONLINE_CONNECTED_KEY, false, { revalidate: false });
   }
 }

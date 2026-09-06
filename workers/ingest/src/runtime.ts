@@ -4,9 +4,13 @@ import type { ConnectionLeases } from "@/lib/connection-leases";
 import type { RedisClient } from "../../../src/lib/redis-driver";
 
 import type { LivePushRoom } from "./index";
+import type { OnlineCounterRoom } from "./online-counter";
 
 export interface Env {
+  /** 开着的页面（含后台标签页）：事件广播走这个房间 */
   LIVE_PUSH: DurableObjectNamespace<LivePushRoom>;
+  /** 此刻可见的页面：页脚「此刻在线」那个数 */
+  ONLINE_COUNTER: DurableObjectNamespace<OnlineCounterRoom>;
   IMAGES: R2Bucket;
   /** 上报器使用的密钥，也是回敲站点 /api/revalidate 的凭据。没配则上报入口一律 503 */
   TELEMETRY_INGEST_SECRET?: string;

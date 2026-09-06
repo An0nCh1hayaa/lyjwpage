@@ -4,32 +4,40 @@ import { failure, recovered } from "./log.js";
 
 type Cadence = typeof config.cadence;
 
-/** 公开计数口不带 ingest 凭据；读不到只向慢档退，不影响限额采集和心跳。 */
-async function headCount(
-  origin: string,
-  field: "online" | "connections",
+type HeadCounts = { online: number; connections: number };
+
+const NOBODY: HeadCounts = { online: 0, connections: 0 };
+
+/**
+ * ingest Worker 的 `/count` 一次回答两个数：`online` 是此刻可见的页面，
+ * `connections` 是开着的页面（含后台标签页）。公开计数口不带 ingest 凭据；
+ * 读不到只向慢档退，不影响限额采集和心跳。
+ */
+async function headCounts(
+  url: string,
   timeoutMs: number,
   request: typeof fetch,
-): Promise<number> {
-  if (!origin) return 0;
-  const scope = `${field}-count`;
+): Promise<HeadCounts> {
+  if (!url) return NOBODY;
+  const scope = "head-count";
   try {
-    const response = await request(`${origin}/count`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const response = await request(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) throw new Error(`计数接口返回 ${response.status}`);
     const body: unknown = await response.json();
-    const value = body && typeof body === "object"
-      ? (body as Record<string, unknown>)[field]
-      : undefined;
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-      throw new Error(`计数接口缺少合法 ${field}`);
+    if (!body || typeof body !== "object") throw new Error("计数接口返回的不是对象");
+    const counts = { online: 0, connections: 0 };
+    for (const field of ["online", "connections"] as const) {
+      const value = (body as Record<string, unknown>)[field];
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`计数接口缺少合法 ${field}`);
+      }
+      counts[field] = value;
     }
     recovered(scope);
-    return value;
+    return counts;
   } catch (error) {
     failure(scope, error);
-    return 0;
+    return NOBODY;
   }
 }
 
@@ -37,12 +45,9 @@ export async function nextDelay(
   cadence: Cadence = config.cadence,
   request: typeof fetch = fetch,
 ): Promise<number> {
-  if (await headCount(cadence.onlineCounterUrl, "online", cadence.countTimeoutMs, request) > 0) {
-    return cadence.liveIntervalMs;
-  }
-  if (await headCount(cadence.livePushUrl, "connections", cadence.countTimeoutMs, request) > 0) {
-    return cadence.openIntervalMs;
-  }
+  const counts = await headCounts(cadence.countUrl, cadence.countTimeoutMs, request);
+  if (counts.online > 0) return cadence.liveIntervalMs;
+  if (counts.connections > 0) return cadence.openIntervalMs;
   return cadence.idleIntervalMs;
 }
 

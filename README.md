@@ -131,18 +131,20 @@ Mac、iPhone、HomePod、Emby、PlayStation、server、agents。设备遥测采�
 
 Worker 的 `src/fanout.ts` 将带数据的事件直接广播到 Durable Object。
 浏览器直连 `/ws`，`hooks/use-live-events.ts` 将事件写入 SWR 缓存；站点不发布事件、不持有长连接。
+页脚的「此刻在线」是同一个 Worker 上的另一条连接 `/online/ws`，`hooks/use-online-count.ts` 负责。
 
 | 方法 | Worker 路径 | 用途 |
 | --- | --- | --- |
 | POST | `/api/ingest/<来源>` | Bearer 鉴权，接收数据、落库、广播与缓存失效 |
-| GET | `/ws` | 浏览器连接，按 `ALLOWED_ORIGINS` 检查来源 |
-| GET | `/count` | 上报器读取连接数，调整上报频率 |
+| GET | `/ws` | 浏览器收事件推送，页面开着就一直挂着；按 `ALLOWED_ORIGINS` 检查来源 |
+| GET | `/online/ws` | 「此刻在线」，页面不可见时站点整条关掉；同一份来源白名单 |
+| GET | `/count` | `{ connections, online }`：开着的页面数和可见的页面数，上报器据此调整上报频率 |
 
-站点只需配置公开的 `NEXT_PUBLIC_LIVE_PUSH_URL`，浏览器由此拼接 `/ws`。
+站点只需配置公开的 `NEXT_PUBLIC_LIVE_PUSH_URL`，浏览器由此拼接 `/ws` 和 `/online/ws`。
 
-这里从前走 Pusher 协议（云 Pusher，或自部署 [Sockudo](https://github.com/sockudo/sockudo)）。换掉的理由不是它不好用，而是这条链路上唯一还托在别人手里的一环：单条事件 10 KB 的上限就近在眼前（两张列表 4.4 KB / 2.8 KB），免费额度按连接数和消息数计，而在线人数那条已经在自己的 Worker 上跑着了（`workers/online-counter`）。两个 Worker 分开部署：那个只数人头，谁连上谁断开就是全部输入；这个要接站点的写入、要鉴权、要转发任意负载。
+这里从前走 Pusher 协议（云 Pusher，或自部署 [Sockudo](https://github.com/sockudo/sockudo)）。换掉的理由不是它不好用，而是这条链路上唯一还托在别人手里的一环：单条事件 10 KB 的上限就近在眼前（两张列表 4.4 KB / 2.8 KB），免费额度按连接数和消息数计，而在线人数那条当时已经在自己的 Worker 上跑着了。两条连接如今在同一个 Worker 里，但仍是两个 Durable Object：人数那个房间人一变就要广播、连接常驻实例、静默 90 秒就踢；推送那个房间走休眠 API，静默 5 分钟不计数、30 分钟才关。口径不同，清理策略也不能共用。
 
-连接走休眠版的 `ctx.acceptWebSocket()`，心跳用 `setWebSocketAutoResponse` 由运行时直接回 —— 这些连接绝大多数时间空转（上报器几十秒才来一条），实例可以被回收、连接照样挂着。
+推送房间的连接走休眠版的 `ctx.acceptWebSocket()`，心跳用 `setWebSocketAutoResponse` 由运行时直接回 —— 这些连接绝大多数时间空转（上报器几十秒才来一条），实例可以被回收、连接照样挂着。
 
 推送上只跑「状态翻面」：换前台应用、换曲子、插拔充电头、上报器上下线、两张列表变了。滚动读数（功率曲线、token 用量）仍由卡片自己 30 秒一轮地取 —— 推它们等于把推送当轮询用。丢一条也不至于卡住页面，轮询是兜底。
 
@@ -639,20 +641,22 @@ Authorization: Bearer <TELEMETRY_INGEST_SECRET>
 限额使用更长间隔（`apple-music-reporter` 从前也在这套里，它已经退役，那份列表改由站点在
 访客的请求里自己拉，见[上面那节](#最近在听--apple-music)）：
 
+三家每轮问一次 ingest Worker 的 `GET /count`，一次拿到两个数：
+
 | 问到什么 | server / PlayStation | agent limits |
 | --- | --- | --- |
-| `online-counter` 的 `GET /count` 大于 0 —— 有页面**可见** | 60 秒 | 5 分钟 |
-| 否则 `live-push` 的 `GET /count` 大于 0 —— 有页面**开着** | 2 分钟 | 10 分钟 |
+| `online` 大于 0 —— 有页面**可见** | 60 秒 | 5 分钟 |
+| 否则 `connections` 大于 0 —— 有页面**开着** | 2 分钟 | 10 分钟 |
 | 两个都是 0 | 15 分钟 | 60 分钟 |
 
 要两个数是因为它们是两个口径：`use-online-count` 在页面不可见时把连接整条关掉，所以
-切走的标签页、锁了屏的手机在 online-counter 那侧算 0；`use-live-events` 那条不关，于是
-它们只出现在 live-push 那个数里。中间那档就是为「切走了但还会切回来」留的 —— 切回来
-那一下不该看见一刻钟前的数字，又不值得按可见那档一直打上游。可见问到了就不问第二个。
+切走的标签页、锁了屏的手机在 `online` 里算 0；`use-live-events` 那条不关，于是
+它们只出现在 `connections` 里。中间那档就是为「切走了但还会切回来」留的 —— 切回来
+那一下不该看见一刻钟前的数字，又不值得按可见那档一直打上游。
 
-读不到（超时、非 200、形状不对、没配那个变量）一律当 0：**兜底方向是单向的**，只会往
-慢里退，永远不会因为故障变快。live-push 一份生产一个，三家读的都是 Vercel 那一份，
-国内那份生产上开着的页面因此不进判断 —— 少数了同样只会更慢。
+读不到（超时、非 200、形状不对、没配 `SITE_URL`）一律当 0：**兜底方向是单向的**，只会往
+慢里退，永远不会因为故障变快。人头数读的就是上报那同一个源。ingest Worker 一份生产一个，
+三家读的都是 Vercel 那一份，国内那份生产上开着的页面因此不进判断 —— 少数了同样只会更慢。
 
 `server-reporter` 和 `agent-limits-reporter` 是常驻进程，长档拆成一个个快档长度的小觉，
 醒来重新问一次，该走更快那档了立刻开跑。限额每 5 分钟重查，server 每 60 秒重查，

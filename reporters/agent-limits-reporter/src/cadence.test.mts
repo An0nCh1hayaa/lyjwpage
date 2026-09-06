@@ -6,32 +6,31 @@ const cadence = {
   liveIntervalMs: 300_000,
   openIntervalMs: 600_000,
   idleIntervalMs: 3_600_000,
-  onlineCounterUrl: "https://online.example",
-  livePushUrl: "https://push.example",
+  countUrl: "https://ingest.example/count",
   countTimeoutMs: 2_500,
 };
 
-test("三档按可见、开着、无人选择；可见时不请求第二个计数口", async () => {
-  for (const [online, connections, expected, calls] of [
-    [1, 8, 300_000, 1], [0, 2, 600_000, 2], [0, 0, 3_600_000, 2],
+test("三档按可见、开着、无人选择；一次请求拿到两个数", async () => {
+  for (const [online, connections, expected] of [
+    [1, 8, 300_000], [0, 2, 600_000], [0, 0, 3_600_000],
   ]) {
     const urls: string[] = [];
     const request: typeof fetch = async (url, init) => {
       urls.push(String(url));
       assert.ok(init?.signal instanceof AbortSignal);
       assert.equal(init?.headers, undefined);
-      return Response.json(String(url).includes("online.example") ? { online } : { connections });
+      return Response.json({ ok: true, online, connections });
     };
     assert.equal(await nextDelay(cadence, request), expected);
-    assert.deepEqual(urls, ["https://online.example/count", "https://push.example/count"].slice(0, calls));
+    assert.deepEqual(urls, ["https://ingest.example/count"]);
   }
 });
 
-test("未配置不出网；计数异常只向慢档退，另一计数口仍可选中档", async () => {
+test("未配置不出网；计数异常或任一字段不合法都只向慢档退", async () => {
   let calls = 0;
-  assert.equal(await nextDelay({ ...cadence, onlineCounterUrl: "", livePushUrl: "" }, async () => {
+  assert.equal(await nextDelay({ ...cadence, countUrl: "" }, async () => {
     calls++;
-    return Response.json({ online: 0, connections: 0 });
+    return Response.json({ online: 1, connections: 1 });
   }), 3_600_000);
   assert.equal(calls, 0);
 
@@ -40,13 +39,13 @@ test("未配置不出网；计数异常只向慢档退，另一计数口仍可�
     () => { throw new DOMException("timeout", "TimeoutError"); },
     () => new Response("unavailable", { status: 503 }),
     () => new Response("not json"),
-    ...[null, {}, { online: "1" }, { online: -1 }, { online: 0.5 }].map(body => () => Response.json(body)),
+    ...[
+      null, {}, { connections: 1 }, { online: 1 },
+      { online: "1", connections: 1 }, { online: -1, connections: 1 }, { online: 0.5, connections: 1 },
+      { online: 1, connections: "8" },
+    ].map(body => () => Response.json(body)),
   ];
   for (const fail of failures) {
-    const request: typeof fetch = async url => String(url).includes("online.example")
-      ? fail()
-      : Response.json({ connections: 1 });
-    assert.equal(await nextDelay(cadence, request), 600_000);
     assert.equal(await nextDelay(cadence, async () => fail()), 3_600_000);
   }
 });

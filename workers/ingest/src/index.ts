@@ -12,13 +12,18 @@ import { recordAgentLimits } from "./stores/vibecoding";
 import { refreshRecentlyPlayed } from "./apple-music-recent";
 
 import { ROOM_ID } from "./live-platform";
+import { OnlineCounterRoom } from "./online-counter";
 import { requestStore, type Env } from "./runtime";
 
 /** 接收所有上报，在 Worker 内写 Redis、广播 WebSocket，再通知 Vercel 缓存失效。 */
 
 export type { Env };
+// Durable Object 类必须从入口模块导出，wrangler 按名字找
+export { OnlineCounterRoom };
 
 const WS_PATH = "/ws";
+/** 「此刻在线」的连接。和 /ws 是两个房间、两个口径，见 online-counter.ts */
+const ONLINE_WS_PATH = "/online/ws";
 const INGEST_PREFIX = "/api/ingest/";
 
 /** 来源名称是对外契约，处理器只存在于此 Worker。 */
@@ -35,8 +40,8 @@ const HANDLERS: Record<string, (body: unknown) => Promise<unknown>> = {
 const LOCAL_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 
 /*
- * 下面这四个函数和 online-counter / musickit-token 那两个 worker 逐字一样
- * （workers/online-counter/src/index.ts），改一处记得同步另外两处。
+ * 下面这四个函数和 musickit-token 那个 worker 逐字一样
+ * （workers/musickit-token/src/index.ts），改一处记得同步另一处。
  *
  * 没抽成共享包是故意的：域名名单本来就得在每份 wrangler.toml 里各配一次，
  * 抽包省不掉那份重复，却要多一个包和一层依赖解析。
@@ -132,6 +137,33 @@ function bearerToken(request: Request): string | null {
 
 function getRoom(env: Env): DurableObjectStub<LivePushRoom> {
   return env.LIVE_PUSH.get(env.LIVE_PUSH.idFromName(ROOM_ID));
+}
+
+function getOnlineRoom(env: Env): DurableObjectStub<OnlineCounterRoom> {
+  return env.ONLINE_COUNTER.get(env.ONLINE_COUNTER.idFromName(ROOM_ID));
+}
+
+/**
+ * 两个人头数一起回答。`connections` 是开着的页面（含后台标签页），`online` 是
+ * 此刻可见的页面；三个上报器按这两个数分档，字段名是它们那边写死的契约。
+ */
+async function headCounts(env: Env): Promise<{ connections: number; online: number }> {
+  const [connections, online] = await Promise.all([
+    getRoom(env).connectionCount(),
+    getOnlineRoom(env).count(),
+  ]);
+  return { connections, online };
+}
+
+/** 两条 WebSocket 入口共用的握手前检查：来源白名单、必须是升级请求。 */
+function rejectSocket(request: Request, env: Env): Response | null {
+  if (!isAllowedOrigin(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  if (request.headers.get("Upgrade") !== "websocket") {
+    return new Response("Expected WebSocket upgrade", { status: 426 });
+  }
+  return null;
 }
 
 function reason(error: unknown): string {
@@ -297,12 +329,8 @@ const worker = {
     }
 
     if (url.pathname === WS_PATH) {
-      if (!isAllowedOrigin(request, env)) {
-        return new Response("Forbidden", { status: 403 });
-      }
-      if (request.headers.get("Upgrade") !== "websocket") {
-        return new Response("Expected WebSocket upgrade", { status: 426 });
-      }
+      const rejected = rejectSocket(request, env);
+      if (rejected) return rejected;
       const response = await getRoom(env).fetch(request);
       if (response.status === 101 && env.REDIS_URL) {
         await requestStore.run({ env, ctx }, () => refreshRecentlyPlayed());
@@ -310,13 +338,21 @@ const worker = {
       return response;
     }
 
+    if (url.pathname === ONLINE_WS_PATH) {
+      // 不走上面那条的最近在听刷新：这条连接按可见性反复重连，每切一次标签页就
+      // 敲一次 Redis 闸门不值得；开着页面的那条 /ws 已经把刷新带起来了
+      const rejected = rejectSocket(request, env);
+      if (rejected) return rejected;
+      return getOnlineRoom(env).fetch(request);
+    }
+
     if (url.pathname === "/count") {
-      return jsonResponse({ ok: true, connections: await getRoom(env).connectionCount() });
+      return jsonResponse({ ok: true, ...(await headCounts(env)) }, { headers: cors });
     }
 
     if (url.pathname === "/") {
-      const online = await getRoom(env).connectionCount();
-      return jsonResponse({ ok: true, service: "ingest", connections: online });
+      // 只报存活，不碰 Durable Object：根路径被各种探针和浏览器不停打，人头数走 /count
+      return jsonResponse({ ok: true, service: "ingest" });
     }
 
     return new Response("Not found", { status: 404 });

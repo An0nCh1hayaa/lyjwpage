@@ -20,15 +20,15 @@
 3. 按 MacTelemetryHub `AgentLimitsCollector` 的规则翻译成站点请求体
 4. POST 到站点
 
-每轮收尾先读 `ONLINE_COUNTER_URL/count` 的 `online`，大于 0 走快档；否则再读
-`LIVE_PUSH_URL/count` 的 `connections`，大于 0 走中档，否则走闲档。与 server /
+每轮收尾读一次 `SITE_URL/count`：`online`（有页面**可见**）大于 0 走快档；否则
+`connections`（有页面**开着**，含后台标签页）大于 0 走中档，否则走闲档。与 server /
 PlayStation 上报器采用同款人数分档逻辑，限额使用自己的 5 / 10 / 60 分钟。
-计数超时、非成功响应、格式错误或未配置一律当 0，不触发上报失败重试。
-两个地址都未配置时固定走 60 分钟。
+计数超时、非成功响应、格式错误一律当 0，不触发上报失败重试。
+只配 `SITE_INGEST_URL` 不配 `SITE_URL` 时读不到人头数，固定走 60 分钟。
 
 长档每 5 分钟重查人数，发现更快档立即采集；人数减少不延后已经定好的下一轮。
 只查公开计数口，不带 ingest 密钥，也不在这些检查里访问厂商限额接口。
-`LIVE_PUSH_URL` 填 Vercel 那份生产，国内生产的后台连接不计入，少计只会减速。
+ingest Worker 一份生产一个，`SITE_URL` 填 Vercel 那份，国内生产的后台连接不计入，少计只会减速。
 
 默认发 `claude` / `codex` / `grok` / `cursor` / `antigravity`。一家失败只影响那一行。
 
@@ -38,11 +38,9 @@ PlayStation 上报器采用同款人数分档逻辑，限额使用自己的 5 / 
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://ingest.homepage.lyjw.llc`。端点路径由上报器自己拼 |
-| `SITE_INGEST_URL` | | 直接给完整端点，给了就不用 `SITE_URL`。默认 `${SITE_URL}/api/ingest/agents` |
+| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://ingest.homepage.lyjw.llc`。上报端点和人头数的 `/count` 都由上报器从它拼 |
+| `SITE_INGEST_URL` | | 直接给完整端点，给了就不用 `SITE_URL` 上报；人头数仍只从 `SITE_URL` 读 |
 | `TELEMETRY_INGEST_SECRET` | ✅ | 和站点同名变量对上，作 Bearer 鉴权。站点没配时才可留空 |
-| `ONLINE_COUNTER_URL` | | online-counter 的源地址，不带 `/count`；未配视为无人可见 |
-| `LIVE_PUSH_URL` | | Vercel 那份 live-push 的源地址，不带 `/count`；未配视为无人开着 |
 | `LIVE_INTERVAL_MS` | | 默认 `300000`（5 分钟），有可见页面；也是长档重查人数的间隔 |
 | `OPEN_INTERVAL_MS` | | 默认 `600000`（10 分钟），只有后台页面 |
 | `IDLE_INTERVAL_MS` | | 默认 `3600000`（60 分钟），无人打开；改长时同步放宽站点 `AGENT_LIMITS_STALE_MS` |
@@ -137,9 +135,9 @@ cursor 是 `{ period, plan, hardLimit }` 三份 DashboardService 响应。有它
 
 从固定间隔升级时，先将 Vercel / EdgeOne 两份站点部署为
 `AGENT_LIMITS_STALE_MS=11100000`（185 分钟，三轮闲档加缓存余量），删除旧的
-`AGENT_LIMITS_PUSH_INTERVAL_MS`。然后更新 NAS `.env`：删除 `PUSH_INTERVAL_MS`，
-配置 `ONLINE_COUNTER_URL` 和 `LIVE_PUSH_URL`，按需设置三档间隔，再重建容器。
-旧固定间隔变量已移除。
+`AGENT_LIMITS_PUSH_INTERVAL_MS`。然后更新 NAS `.env`：删除 `PUSH_INTERVAL_MS`、
+`ONLINE_COUNTER_URL`、`LIVE_PUSH_URL`（人头数改从 `SITE_URL` 读），按需设置三档间隔，
+再重建容器。旧变量已移除。
 
 拷过去（dsm 的 sftp 子系统是关的，`scp` 用不了，走 tar 管道）：
 

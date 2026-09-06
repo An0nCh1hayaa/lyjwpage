@@ -20,21 +20,22 @@ Cloudflare Worker 上的 PSN 上报器：cron 每分钟响一次，前面挡一�
 先过一道门，门开了才是一轮完整 tick：
 
 - 读 KV 里 `meta:lastFullTick`（上一轮完整 tick 的**开始**时刻）；
-- 攒够 14.5 分钟就直接放行，连人头数都不问 —— 闲时节奏不该依赖另外两个 worker 可不可达；
+- 攒够 14.5 分钟就直接放行，连人头数都不问 —— 闲时节奏不该依赖 ingest Worker 可不可达；
 - 不到 55 秒直接挡回去；
-- 中间那段先问 `online-counter` 的 `GET /count`（超时 2.5 秒）：有页面**可见**就放行；
-- 都不可见、且已经攒够 115 秒，再问 `live-push` 的 `GET /count`：有页面**开着**就放行。
+- 中间那段问一次 ingest Worker 的 `GET /count`（超时 2.5 秒），一次拿到两个数：
+  `online` 大于 0（有页面**可见**）就放行；否则已经攒够 115 秒、且 `connections`
+  大于 0（有页面**开着**）也放行。
 
 两个数是两个口径：站点侧 `use-online-count` 在页面不可见时把连接整条关掉，所以切走的
-标签页、锁了屏的手机在 online-counter 那侧算 0；`use-live-events` 那条不关，所以它们
-只在 live-push 那个数里。中间那档就是为「切走了但还会切回来」留的。
+标签页、锁了屏的手机在 `online` 里算 0；`use-live-events` 那条不关，所以它们
+只在 `connections` 里。中间那档就是为「切走了但还会切回来」留的。
 
 于是有人正看着时是 60 秒一轮，presence 有分钟级新鲜度；只是开着时 2 分钟一轮；一个
 页面都没开时每分钟的 cron 把 14.5 分钟这个阈值取整成 15 分钟一轮，**和从前那根十五
 分钟的 cron 逐轮对齐，闲时对 PSN 的流量一模一样**。动机就是这个：presence 的新鲜度
 跟着有没有人看走，没人看的时候一分钱不多花。
 
-门里只有那三个读操作，并且层层短路、排在任何贵操作之前 —— 被挡下的那一响完全不碰
+门里只有那两个读操作，并且层层短路、排在任何贵操作之前 —— 被挡下的那一响完全不碰
 PSN、不碰站点。人头数超时、非 200、返回形状不对，一律**当 0 处理**：兜底方向是单向的，
 读不到只会往慢里退，永远不会因为故障变快。
 
@@ -293,10 +294,9 @@ titleId，屏蔽的游戏不上报、不占窗口；改这份名单会重推奖�
 
 `SITE_URL=https://ingest.homepage.lyjw.llc` 已经在 `wrangler.toml` 里配好，不必再动。要临时回到 dry-run 就把它注释掉。
 
-`ONLINE_COUNTER_URL` 和 `LIVE_PUSH_URL` 同样配好了，填的都是那两个 worker 的**源**
-（路径由这边拼 `/count`，和站点侧 `NEXT_PUBLIC_ONLINE_COUNTER_URL` /
-`NEXT_PUBLIC_LIVE_PUSH_URL` 同一个形状）。注释掉不会让上报停摆，只是对应那一档用不上，
-一路退到 15 分钟一轮的基线节奏。live-push 一份生产一个，填的是 Vercel 那一份 ——
+门读的人头数也来自这同一个源（路径由这边拼 `/count`，和站点侧 `NEXT_PUBLIC_LIVE_PUSH_URL`
+同一个形状）。只配 `SITE_INGEST_URL` 不配 `SITE_URL` 时人头数读不到，上报不停摆，只是
+一路退到 15 分钟一轮的基线节奏。ingest Worker 一份生产一个，这是 Vercel 那一份 ——
 国内那份生产上开着的页面因此不进判断，少数了只会更慢。
 
 本目录是独立 npm 部署单元，保留自己的 `package-lock.json`。重生成时必须在没有

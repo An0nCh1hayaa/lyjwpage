@@ -1,9 +1,8 @@
 import { AuthSession } from "./auth";
 import {
+  countUrl,
   hiddenTitleIds,
   isDryRun,
-  onlineCountUrl,
-  openCountUrl,
   playedGamesLimit,
   titleIdsHidden,
   withoutHiddenTitleIds,
@@ -265,8 +264,9 @@ const LIVE_TICK_INTERVAL_MS = 55_000;
  * 页面**开着但都在后台**时的 tick 间隔（切走的标签页、锁了屏的手机）。同样留
  * 5 秒取整余量：2 分钟一轮。
  *
- * 这一档是为「切走了但还会切回来」留的 —— 那些页面在 online-counter 那侧算 0
- * （站点侧 use-online-count 在不可见时把连接整条关掉），但 live-push 那条不关。
+ * 这一档是为「切走了但还会切回来」留的 —— 那些页面在 `online` 那个数里算 0
+ * （站点侧 use-online-count 在不可见时把连接整条关掉），但事件推送那条不关，
+ * 它们还在 `connections` 里。
  */
 const OPEN_TICK_INTERVAL_MS = 115_000;
 /**
@@ -280,25 +280,30 @@ const IDLE_TICK_INTERVAL_MS = 14.5 * 60_000;
 /** 人头数读不回来不该拖着 tick 等，超时就当没人。 */
 const COUNT_TIMEOUT_MS = 2_500;
 
+type HeadCounts = { online: number; open: number };
+
+function nonNegativeCount(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.trunc(number) : 0;
+}
+
 /**
- * 问一个 worker 要人头数。超时、非 200、形状不对，一律当 0。
+ * 问 ingest Worker 要两个人头数（一次请求，`online` 可见、`connections` 开着）。
+ * 超时、非 200、形状不对，一律当 0。
  *
  * 这个兜底方向是单向的：读不到只会让节奏往慢里退，永远不会因为故障变快 ——
  * 认错方向的代价是每分钟撞一次 PSN。
  */
-async function headCount(url: string, field: "online" | "connections"): Promise<number> {
-  if (!url) return 0;
+async function headCounts(url: string): Promise<HeadCounts> {
+  if (!url) return { online: 0, open: 0 };
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(COUNT_TIMEOUT_MS) });
     if (!response.ok) throw new Error(`返回 ${response.status}`);
     const body = (await response.json()) as Record<string, unknown> | null;
-    const value = Number(body?.[field]);
-    return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+    return { online: nonNegativeCount(body?.online), open: nonNegativeCount(body?.connections) };
   } catch (error) {
-    console.warn(
-      JSON.stringify({ event: "playstation-head-count", field, error: explain(error) }),
-    );
-    return 0;
+    console.warn(JSON.stringify({ event: "playstation-head-count", error: explain(error) }));
+    return { online: 0, open: 0 };
   }
 }
 
@@ -326,24 +331,21 @@ type Gate = {
  * 三档，由两个人头数分出来：有页面**可见**就 55 秒一轮，只是**开着**（后台标签
  * 页、锁了屏的手机）就 115 秒，一个都没有就 15 分钟。
  *
- * 门里只有三个读操作（KV 一枚时间戳 + 两个人头数），都排在任何贵操作之前：被挡
+ * 门里只有两个读操作（KV 一枚时间戳 + 一次两个人头数），都排在任何贵操作之前：被挡
  * 下的那一轮完全不碰 PSN、不碰站点。而且是层层短路的 —— 攒够闲档就不问人数，
- * 没攒够快档阈值就一个都不问，可见问到了就不问第二个。间隔算的是**上一轮开始**
- * 的时刻而不是成功的时刻 —— 否则 PSN 持续故障时，重试会从十五分钟一次恶化成每
- * 分钟一次。
+ * 没攒够快档阈值也不问。间隔算的是**上一轮开始**的时刻而不是成功的时刻 —— 否则
+ * PSN 持续故障时，重试会从十五分钟一次恶化成每分钟一次。
  */
 async function shouldTick(env: Env): Promise<Gate> {
   const lastAt = Math.max(await readFullTickStartedAt(env.STATE), lastFullTickAt);
   const sinceMs = lastAt > 0 ? Date.now() - lastAt : Number.POSITIVE_INFINITY;
-  // 攒够闲档就必跑，不必再问人数：闲时节奏不该依赖另外两个 worker 可不可达
+  // 攒够闲档就必跑，不必再问人数：闲时节奏不该依赖 ingest Worker 可不可达
   if (sinceMs >= IDLE_TICK_INTERVAL_MS) return { run: true, sinceMs, online: null, open: null };
   if (sinceMs < LIVE_TICK_INTERVAL_MS) return { run: false, sinceMs, online: null, open: null };
 
-  const online = await headCount(onlineCountUrl(env), "online");
-  if (online > 0) return { run: true, sinceMs, online, open: null };
-  if (sinceMs < OPEN_TICK_INTERVAL_MS) return { run: false, sinceMs, online, open: null };
-
-  const open = await headCount(openCountUrl(env), "connections");
+  const { online, open } = await headCounts(countUrl(env));
+  if (online > 0) return { run: true, sinceMs, online, open };
+  if (sinceMs < OPEN_TICK_INTERVAL_MS) return { run: false, sinceMs, online, open };
   return { run: open > 0, sinceMs, online, open };
 }
 

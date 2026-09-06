@@ -56,8 +56,8 @@ export const config = {
     liveIntervalMs: ms("LIVE_INTERVAL_MS", 300_000),
     openIntervalMs: ms("OPEN_INTERVAL_MS", 600_000),
     idleIntervalMs: ms("IDLE_INTERVAL_MS", 3_600_000),
-    onlineCounterUrl: trimSlash(process.env.ONLINE_COUNTER_URL?.trim() ?? ""),
-    livePushUrl: trimSlash(process.env.LIVE_PUSH_URL?.trim() ?? ""),
+    /** 人头数读上报那同一个 Worker 的 /count；只配了 SITE_INGEST_URL 就读不到，永远走闲档 */
+    countUrl: siteUrl ? `${trimSlash(siteUrl)}/count` : "",
     countTimeoutMs: ms("COUNT_TIMEOUT_MS", 2_500),
   },
   pushTimeoutMs: ms("PUSH_TIMEOUT_MS", 30_000),

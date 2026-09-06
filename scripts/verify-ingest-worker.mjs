@@ -57,17 +57,34 @@ try {
     compatibility_date: '2025-02-14', compatibility_flags: ['nodejs_compat', 'nodejs_compat_populate_process_env'],
     vars,
     alias: Object.fromEntries(['redis-driver'].map(name => [`@/lib/${name}`, join(root, `workers/ingest/src/${name}.ts`)])),
-    durable_objects: { bindings: [{ name: 'LIVE_PUSH', class_name: 'LivePushRoom' }] },
-    migrations: [{ tag: 'v1', new_sqlite_classes: ['LivePushRoom'] }],
+    durable_objects: { bindings: [
+      { name: 'LIVE_PUSH', class_name: 'LivePushRoom' },
+      { name: 'ONLINE_COUNTER', class_name: 'OnlineCounterRoom' },
+    ] },
+    migrations: [
+      { tag: 'v1', new_sqlite_classes: ['LivePushRoom'] },
+      { tag: 'v2', new_sqlite_classes: ['OnlineCounterRoom'] },
+    ],
     r2_buckets: [{ binding: 'IMAGES', bucket_name: 'isolated-images' }],
   };
   const configPath = join(temporary, 'wrangler.json');
   await writeFile(configPath, JSON.stringify(config));
   start(process.execPath, [require.resolve('wrangler'), 'dev', '--config', configPath, '--port', String(workerPort), '--test-scheduled', '--persist-to', join(temporary, 'state')]);
   start(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'start', '-p', String(sitePort)], {
-    ...vars, VERCEL: '', NEXT_PUBLIC_LIVE_PUSH_URL: '', NEXT_PUBLIC_ONLINE_COUNTER_URL: '', GITHUB_TOKEN: '',
+    ...vars, VERCEL: '', NEXT_PUBLIC_LIVE_PUSH_URL: '', GITHUB_TOKEN: '',
   });
   await eventually(async () => assert.equal((await fetch(`${worker}/count`)).status, 200));
+  assert.deepEqual(await (await fetch(`${worker}/count`)).json(), { ok: true, connections: 0, online: 0 });
+  // 「此刻在线」那条：接进来立刻广播人数，/count 的 online 跟着变；它不该带起最近在听的刷新
+  const onlineSocket = new WebSocket(`${worker.replace('http:', 'ws:')}/online/ws`);
+  const onlineMessages = [];
+  onlineSocket.addEventListener('message', e => onlineMessages.push(JSON.parse(e.data)));
+  await once(onlineSocket, 'open');
+  await eventually(async () => assert.deepEqual(onlineMessages.at(-1), { online: 1 }));
+  assert.deepEqual(await (await fetch(`${worker}/count`)).json(), { ok: true, connections: 0, online: 1 });
+  onlineSocket.close();
+  await eventually(async () => assert.deepEqual(await (await fetch(`${worker}/count`)).json(), { ok: true, connections: 0, online: 0 }));
+  console.log('PASS: /online/ws counts visible pages separately; /count answers both numbers');
   await eventually(async () => assert.equal((await fetch(`${site}/api/status/listening/now`)).status, 200));
   const refreshKey = 'isolated-ingest:cache:apple-music:recent:refresh:v1';
   assert.equal((await fetch(`${worker}/__scheduled`)).status, 200);

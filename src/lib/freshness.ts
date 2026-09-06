@@ -90,7 +90,7 @@ export function playstationStaleMs() {
  * 服务器上报器分三档：有页面可见 60 秒一轮，只是开着（后台标签页、锁了屏）
  * 2 分钟一轮，一个页面都没开 15 分钟一轮（`reporters/server-reporter` 的
  * `LIVE_INTERVAL_MS` / `OPEN_INTERVAL_MS` / `IDLE_INTERVAL_MS`，每轮收尾问一次
- * online-counter 和 live-push 的人头数）。三档和另外两个上报器逐档对齐。
+ * ingest Worker `/count` 的两个人头数）。三档和另外两个上报器逐档对齐。
  * 这份快照本身就是心跳，每轮必发，所以「多久没刷新」等价于「上报器还活着没有」。
  *
  * 这个窗口锚的是**慢档**：有人看时只会更快，判活的下限始终由 15 分钟那档定。

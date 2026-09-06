@@ -16,8 +16,7 @@ routes = [
 # **而且那时只签它一个**，下面这几个写死的域名不会跟着一起签出去。localhost
 # 同理（它始终放行但不在名单里）。见 src/index.ts 的 signedOrigins。
 #
-# 和 live-push / online-counter 那两份是同一个名单，
-# 加域名时三个 worker 都要改、都要重新部署。
+# 和 ingest 那份是同一个名单，加域名时两个 worker 都要改、都要重新部署。
 ALLOWED_ORIGINS = "https://lyjw.me,https://lyjw131.com,https://dev.lyjw.me,https://*.vercel.app"
 
 # 令牌有效期（秒）。不填按 7 天，Apple 允许的上限是 15777000（约半年）。
