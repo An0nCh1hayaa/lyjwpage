@@ -11,7 +11,7 @@ Cloudflare Worker 上的 PSN 上报器：cron 每分钟响一次，前面挡一�
 当轮爬完、对齐、整份交付。
 
 鉴权链和两个读取端点已经用真实凭据跑通，也确认 `Accept-Language: zh-Hans` 会返回
-官方中文名。站点侧的 `/api/ingest/playstation` 已经存在，`wrangler.toml` 里也配了
+官方中文名。ingest Worker 的 `/api/ingest/playstation` 已经存在，`wrangler.toml` 里也配了
 `SITE_URL`，所以默认不是 dry-run。
 
 ## 调度与状态
@@ -291,7 +291,7 @@ titleId，屏蔽的游戏不上报、不占窗口；改这份名单会重推奖�
 2. 按需要写入 secret：`PSN_NPSSO`，以及站点侧要求鉴权时用的
    `TELEMETRY_INGEST_SECRET`。
 
-`SITE_URL` 已经在 `wrangler.toml` 里配好，不必再动。要临时回到 dry-run 就把它注释掉。
+`SITE_URL=https://ingest.homepage.lyjw.llc` 已经在 `wrangler.toml` 里配好，不必再动。要临时回到 dry-run 就把它注释掉。
 
 `ONLINE_COUNTER_URL` 和 `LIVE_PUSH_URL` 同样配好了，填的都是那两个 worker 的**源**
 （路径由这边拼 `/count`，和站点侧 `NEXT_PUBLIC_ONLINE_COUNTER_URL` /

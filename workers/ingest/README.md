@@ -102,7 +102,8 @@
 
 上报器应直接使用 Worker 的源。Mac Telemetry Hub 在「设置 → 远端上报」中将上报端点
 配置为 `https://ingest.homepage.lyjw.llc/api/ingest/mac`，保存后立即生效，Bearer 沿用原值。
-本机配置已切换并验证真实上报返回 202。Vercel rewrite 目前仍承接尚未迁移的其他入口流量。
+所有上报器的生产目的地统一使用该 Worker，具体路径见根目录 README 的上报入口清单。
+Vercel rewrite 仅保留给国内侧尚未迁移的中继流量。
 `live.homepage.lyjw.llc` 也绑定到 ingest，和新域名进入同一房间；上报器原有的
 `LIVE_PUSH_URL` 继续获得同一个 `/count`。完成验证后可删除旧 `live-push` Worker，
 其旧 WebSocket 断开后会按原地址重连到新房间；国内推送服务不在本次变更内。

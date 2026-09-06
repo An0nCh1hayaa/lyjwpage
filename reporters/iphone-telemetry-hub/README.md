@@ -52,7 +52,7 @@
 第一次打开要做两件事：
 
 1. 允许读取健康数据 —— **六项全勾**。少勾哪项就少哪项，站点那边对应的格子直接不渲染。
-2. 右上角齿轮里填上报地址（`https://lyjw131.com/api/ingest/iphone`）和
+2. 右上角齿轮里填上报地址（`https://ingest.homepage.lyjw.llc/api/ingest/iphone`）和
    `TELEMETRY_INGEST_SECRET`，保存，按一次「立刻上报」。密钥存钥匙串，
    `kSecAttrAccessibleAfterFirstUnlock` —— 锁屏状态下被唤醒也要读得到它。
 

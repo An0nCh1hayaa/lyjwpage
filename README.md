@@ -66,16 +66,16 @@ HTTP，只接受 `lib/live-events` 里 `STATUS_TAGS` 名单内的 tag，鉴权�
 
 ### 两份生产之间靠传播上报对齐
 
-上报器只跟其中一个源说话，而两份生产各有各的 Redis、各有各的推送房间、各有各的 Next
+上报器统一直连 ingest Worker，而两份生产各有各的 Redis、各有各的推送房间、各有各的 Next
 缓存。所以**收到上报的那份除了自己落库，还会把同一个请求原样转给对面**：对面进的是同一
 条路径、同一个 handler，于是它写自己的 Redis、推自己的房间、刷自己的 tag —— 三件事都在它
 自己那边发生，没有谁远程指挥谁。国内那份（EdgeOne）**目前仍跑站点自己的 `/api/ingest/*`**，
-直连它的上报器不用动；原来发往 `lyjw.me` 的转发由 Vercel 外部 rewrite 交给 Worker，
-Worker 收到的上报反过来转给它。
+它接收 Worker 的单跳转发。旧的站点上报地址不再作为上报器的生产配置；
+Vercel rewrite 暂时只为国内侧尚未迁移的中继保留。
 
 ```text
-上报器 ──▶ EdgeOne /api/ingest/* ──▶ 自己的 Redis / 自己的 live-push / 自己的 tag
-                └─转发─▶ ingest Worker ──▶ Vercel 的 Redis / 自己的房间 / POST lyjw.me/api/revalidate
+上报器 ──▶ ingest Worker ──▶ Vercel 的 Redis / 自己的房间 / POST lyjw.me/api/revalidate
+                └─转发─▶ EdgeOne /api/ingest/* ──▶ 自己的 Redis / 自己的 live-push / 自己的 tag
 ```
 
 两边各自填对面那个源（`INGEST_PEERS`：Worker 的 `wrangler.toml` 里填 `https://lyjw131.com`，
@@ -126,6 +126,22 @@ Worker 使用 R2 绑定检查对象是否存在。Emby 的 `missingImages` 和 M
 节点上标着对应的源码位置，可按上报写入、页面读取、实时更新分别查看。
 图由 `docs/architecture.json` 生成，改了拓扑两边一起改。
 
+### 上报入口清单
+
+生产上报统一使用 `https://ingest.homepage.lyjw.llc`，路径按数据来源区分。
+配置变量仍名为 `SITE_URL` 的上报器也填这个 Worker 的源；`SITE_INGEST_URL`
+如果非空会优先覆盖它，因此切换时必须一起核对。
+
+| 上报器 | 路径 | 配置位置 |
+| --- | --- | --- |
+| Mac Telemetry Hub | `/api/ingest/mac` | 设置 → 远端上报 |
+| iPhone Telemetry Hub | `/api/ingest/iphone` | 设置 → 上报地址 |
+| Home Assistant / HomePod | `/api/ingest/homepod` | `rest_command.push_homepod_now_playing.url` |
+| Emby 推送代理 | `/api/ingest/emby` | NAS `emby-proxy/.env` 的 `SITE_URL`，运行容器名 `homepage-reporter` |
+| Agent 限额上报器 | `/api/ingest/agents` | NAS `agent-limits-reporter/.env` 的 `SITE_URL` |
+| 服务器上报器 | `/api/ingest/server` | 日本节点 `/opt/lyjwpage/server-reporter/.env` 的 `SITE_URL` |
+| PlayStation 上报 Worker | `/api/ingest/playstation` | `workers/playstation-reporter/wrangler.toml` 的 `SITE_URL` |
+
 ## 状态是怎么接的
 
 所有凭据只存在于服务端，浏览器只看得到 `/api/status/*` 返回的规范化数据。这些路由共用 `src/lib/api.ts` 的信封：上游挂掉时返回 `{ ok: false, error }` 而不是 5xx，让某一路数据源离线不至于把整页 SWR 打成错误态。
@@ -134,7 +150,7 @@ Worker 使用 R2 绑定检查对象是否存在。Emby 的 `missingImages` 和 M
 
 Redis TCP 连接按请求作用域租用：同一 Node 实例里的并发请求共用一条，最后一个请求和命令结束后主动断开。不能让 ioredis 永久单例留在 serverless 实例里——实例暂停时普通 idle timer 不会跑，旧部署和 Preview 会各留一条空闲连接。Preview 必须不配 Redis 或使用独立 `REDIS_URL`；`REDIS_PREFIX` 只隔离键，不隔离连接额度。
 
-各路数据几乎全是**推进来**的，本站没有任何按钟轮询上游的东西。推送入口共用 `/api/ingest/<来源>` 这组路径和同一个 `TELEMETRY_INGEST_SECRET`：Vercel 那份由 `workers/ingest` 接（`lyjw.me/api/ingest/*` 在路由层转交，上报器也可直连 Worker），EdgeOne 那份暂时仍由站点 `src/app/api/ingest/` 下的路由接，两边跑的是 `src/lib` 里同一个 `record*`。状态落在 `lib/redis.ts` 的 mirrorKey 里（Redis 为主、进程内存为辅，没配 `REDIS_URL` 也能跑）。七个上报侧：Mac Telemetry Hub、iPhone Telemetry Hub、Home Assistant（HomePod）、Emby 推送代理、PlayStation 上报 Worker、VPS 上的 server-reporter、NAS 上的各 agent 限额上报器（`reporters/agent-limits-reporter`）。剩下那两路没有上报方（Apple Music 的「最近在听」、GitHub 贡献日历）由站点自己拉，见下一段。PlayStation 那个 Worker 的 `wrangler.toml` 里 `SITE_URL` 已经填成主站，合并到 main 部署之后即开始真实上报；站点侧已经接好 `/api/ingest/playstation`、`/api/status/playing`、`/api/status/playing/now` 和 `/api/status/trophies`，Worker 的代码和部署说明在 `workers/playstation-reporter/`。它的 cron 每分钟看一眼[那两个人头数](#三个上报器共用一套三档)：有人正看着就 60 秒一轮完整 tick，页面只是开着 2 分钟一轮，一个页面都没开压回 15 分钟一轮，**每轮都发 presence** —— 内容没变也发，那一封就是心跳：站点照样落库刷新 `observedAt`，但不广播、也不急失效，只推一次普通 tag 让快照跟着走。断流判定因此在 `/api/status/playing/now` 出口每次请求现算（`PLAYSTATION_STALE_MS`，默认 50 分钟 = 闲时三轮加余量），超窗发降级信封：**Worker 死了是「不知道他在不在玩」，不是「他离线了」**，所以宁可让卡片收起「正在游玩」那一行，也不伪造一个 `online: false`。奖杯目录只在解锁指纹变化时才推，没有 `/now`，也不走实时推送。前两个是**设备级的遥测中心**：一台设备一个入口、一个信封、一个 `modules` 字典。上报器只跟一个源站说话，收到的那份会把请求原样转给对端部署，见[上面那节](#两份生产之间靠传播上报对齐)。
+各路数据几乎全是**推进来**的，本站没有任何按钟轮询上游的东西。推送入口共用 `/api/ingest/<来源>` 这组路径和同一个 `TELEMETRY_INGEST_SECRET`：Vercel 那份由 `workers/ingest` 接（`lyjw.me/api/ingest/*` 在路由层转交，上报器统一直连 Worker），EdgeOne 那份暂时仍由站点 `src/app/api/ingest/` 下的路由接，两边跑的是 `src/lib` 里同一个 `record*`。状态落在 `lib/redis.ts` 的 mirrorKey 里（Redis 为主、进程内存为辅，没配 `REDIS_URL` 也能跑）。七个上报侧：Mac Telemetry Hub、iPhone Telemetry Hub、Home Assistant（HomePod）、Emby 推送代理、PlayStation 上报 Worker、VPS 上的 server-reporter、NAS 上的各 agent 限额上报器（`reporters/agent-limits-reporter`）。剩下那两路没有上报方（Apple Music 的「最近在听」、GitHub 贡献日历）由站点自己拉，见下一段。PlayStation 那个 Worker 的 `wrangler.toml` 里 `SITE_URL` 已经填成 ingest Worker，合并到 main 部署之后即开始真实上报；站点侧已经接好 `/api/ingest/playstation`、`/api/status/playing`、`/api/status/playing/now` 和 `/api/status/trophies`，Worker 的代码和部署说明在 `workers/playstation-reporter/`。它的 cron 每分钟看一眼[那两个人头数](#三个上报器共用一套三档)：有人正看着就 60 秒一轮完整 tick，页面只是开着 2 分钟一轮，一个页面都没开压回 15 分钟一轮，**每轮都发 presence** —— 内容没变也发，那一封就是心跳：站点照样落库刷新 `observedAt`，但不广播、也不急失效，只推一次普通 tag 让快照跟着走。断流判定因此在 `/api/status/playing/now` 出口每次请求现算（`PLAYSTATION_STALE_MS`，默认 50 分钟 = 闲时三轮加余量），超窗发降级信封：**Worker 死了是「不知道他在不在玩」，不是「他离线了」**，所以宁可让卡片收起「正在游玩」那一行，也不伪造一个 `online: false`。奖杯目录只在解锁指纹变化时才推，没有 `/now`，也不走实时推送。前两个是**设备级的遥测中心**：一台设备一个入口、一个信封、一个 `modules` 字典。上报器只跟一个源站说话，收到的那份会把请求原样转给对端部署，见[上面那节](#两份生产之间靠传播上报对齐)。
 
 首屏 HTML 与状态 API 使用独立的 `page:<主题>` / `api:<主题>` 缓存标签和条目。
 普通上报让两份都后台更新；播放、充电结构等 urgent 上报只让 API 立即失效，首屏仍先返回
@@ -511,7 +527,7 @@ payload 带一个 `expiresInMs`，由浏览器把下一次取数排在到期那�
 `rest_command.push_homepod_now_playing` 的形状（`<E>` 换成对应实体）：
 
 ```yaml
-url: "https://lyjw131.com/api/ingest/homepod"
+url: "https://ingest.homepage.lyjw.llc/api/ingest/homepod"
 method: post
 content_type: "application/json"
 headers:

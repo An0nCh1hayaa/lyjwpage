@@ -42,7 +42,7 @@ live-push 是**一份生产一个**，`LIVE_PUSH_URL` 填的是 Vercel 那一份
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `SITE_URL` | ✅ | 站点地址，如 `https://lyjw.me`。端点路径由上报器自己拼 |
+| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://ingest.homepage.lyjw.llc`。端点路径由上报器自己拼 |
 | `SITE_INGEST_URL` | | 直接给完整端点，给了就不用 `SITE_URL` |
 | `TELEMETRY_INGEST_SECRET` | ✅ | 和站点同名变量对上，作 Bearer 鉴权。站点没配时才可留空 |
 | `HOST_ID` | | 默认 `misaka-jp`，卡片上认的名字 |
@@ -78,7 +78,7 @@ ssh misaka-jp 'cat > /opt/lyjwpage/server-reporter/.env && chmod 600 /opt/lyjwpa
 ssh misaka-jp 'install -m 644 /opt/lyjwpage/server-reporter/server-reporter.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now server-reporter'
 ```
 
-`SITE_URL` 指到站点跑的那台。站点在 MacBook 上时，这台公网 VPS 够不着 `localhost:3211`，要么临时做一条 SSH 反向隧道，要么等站点部署到生产再把 `SITE_URL` 改成 `https://lyjw.me`。
+生产的 `SITE_URL` 统一填 `https://ingest.homepage.lyjw.llc`，不经 Vercel 或 EdgeOne 站点。
 
 看日志：`journalctl -u server-reporter -f`。
 

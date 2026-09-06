@@ -38,7 +38,7 @@ PlayStation 上报器采用同款人数分档逻辑，限额使用自己的 5 / 
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `SITE_URL` | ✅ | 站点地址，如 `https://lyjw131.com`。端点路径由上报器自己拼 |
+| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://ingest.homepage.lyjw.llc`。端点路径由上报器自己拼 |
 | `SITE_INGEST_URL` | | 直接给完整端点，给了就不用 `SITE_URL`。默认 `${SITE_URL}/api/ingest/agents` |
 | `TELEMETRY_INGEST_SECRET` | ✅ | 和站点同名变量对上，作 Bearer 鉴权。站点没配时才可留空 |
 | `ONLINE_COUNTER_URL` | | online-counter 的源地址，不带 `/count`；未配视为无人可见 |

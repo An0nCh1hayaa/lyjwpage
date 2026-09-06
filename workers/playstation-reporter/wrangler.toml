@@ -20,9 +20,9 @@ PSN_ACCOUNT_ID = "me"
 PLAYED_GAMES_LIMIT = "100"
 # 三角洲行动、明日方舟：终末地
 PLAYSTATION_HIDDEN_TITLE_IDS = "PPSA28884_00,PPSA18538_00"
-# Cloudflare 全球网络直连 Vercel 主站，EdgeOne 由站点 ingest 中继同步。
-SITE_URL = "https://lyjw.me"
-# SITE_INGEST_URL = "https://lyjw131.com/api/ingest/playstation"
+# 上报直连 ingest Worker，由它负责入库、推送和对端转发。
+SITE_URL = "https://ingest.homepage.lyjw.llc"
+# SITE_INGEST_URL = "https://ingest.homepage.lyjw.llc/api/ingest/playstation"
 # 门读这两个 worker 的 /count 定节奏。填源不填路径，和站点侧的
 # NEXT_PUBLIC_ONLINE_COUNTER_URL / NEXT_PUBLIC_LIVE_PUSH_URL 同一个形状。
 # online-counter 数「此刻可见」的页面，live-push 数「开着」的（含后台标签页）。

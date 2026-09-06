@@ -30,7 +30,7 @@ struct SettingsView: View {
                 } header: {
                     Text("上报到哪儿")
                 } footer: {
-                    Text("地址形如 https://lyjw131.com/api/ingest/iphone，密钥就是站点的 TELEMETRY_INGEST_SECRET。密钥存在钥匙串里，数据只发往这一个地址。")
+                    Text("地址形如 https://ingest.homepage.lyjw.llc/api/ingest/iphone，密钥就是站点的 TELEMETRY_INGEST_SECRET。密钥存在钥匙串里，数据只发往这一个地址。")
                 }
 
                 Section {
