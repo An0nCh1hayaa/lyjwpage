@@ -13,7 +13,8 @@ const retryAfter = new Map<string, number>();
 
 /**
  * 动态封面解析在站点自己身上（app/api/motion-artwork），同源相对路径。
- * 不再传参，由服务端按此刻在播的链接自决；响应里带 link 用来对号。
+ * 按 `url=<链接>` 去问：卡片问的是 hero 那张，网页播放器问的是访客点开的那张，
+ * 后者服务端猜不到。响应里带 link 用来对号。
  */
 const MOTION_ENDPOINT = "/api/motion-artwork";
 
@@ -43,7 +44,7 @@ export async function fetchMotionArtwork(
 
   const promise = (async () => {
     try {
-      const response = await fetch(MOTION_ENDPOINT);
+      const response = await fetch(`${MOTION_ENDPOINT}?url=${encodeURIComponent(url)}`);
 
       if (!response.ok) {
         return null;

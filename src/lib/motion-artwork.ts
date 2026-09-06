@@ -6,8 +6,8 @@ import type { AppleMusicParsed } from "@/lib/motion-artwork-url";
  * Apple Music 正方形动态封面（`motionDetailSquare`）解析。
  *
  * 从前是独立的 Cloudflare Worker（am-motion-artwork），现在收编进站点：
- * `/api/motion-artwork` 由服务端按此刻在播那首的链接自决，浏览器不传参，少一个
- * 要单独部署、单独配 ALLOWED_ORIGINS 的部件。逻辑原样搬来 —— 用从 music.apple.com 网页 JS 里
+ * `/api/motion-artwork` 按 `url` 参数答，不带参数时由服务端按此刻在播那首的链接
+ * 自决，少一个要单独部署、单独配 ALLOWED_ORIGINS 的部件。逻辑原样搬来 —— 用从 music.apple.com 网页 JS 里
  * 扒的 web token 打 amp-api，**不用** Mac 上报器推来的那份 MusicKit 凭据：
  * `editorialVideo` 是 amp-api 的扩展属性，公开目录 API 认不认它没有验证过，
  * 而扒来的 token 本来就一分钱凭据不用。token 的扒取、缓存、401 作废在
@@ -16,7 +16,7 @@ import type { AppleMusicParsed } from "@/lib/motion-artwork-url";
  * 缓存从 Cloudflare 边缘缓存换成 lib/cache（Redis 为主、进程内存兜底），
  * TTL 沿用 Worker 的约定：**有**动态封面 24 小时，**确认没有** 1 小时 ——
  * 后者短是留给「专辑后来补了动态封面」的翻案窗口。上游出错不写缓存，
- * 只留 5 秒负缓存挡穿透。响应 no-store、只有 lib/cache 这一层缓存（见
+ * 只留 5 秒负缓存挡穿透。带参的响应 CDN 也存一份，不带参的 no-store（见
  * app/api/motion-artwork/route.ts）。
  */
 

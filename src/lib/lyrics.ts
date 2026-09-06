@@ -57,7 +57,7 @@ function storefront(): string {
  * 而它一个键只吃一个 TTL。in-flight 去重和 5 秒负缓存照动态封面那套。
  */
 export async function resolveLyrics(songId: string): Promise<LyricsResult> {
-  // 目录 ID 只会是一串数字；现在它来自快照（Apple 目录查回来的），这里只是防御性再查一道
+  // 目录 ID 只会是一串数字；路由那边对请求参数查过一道，这里防御性再查一道
   if (!/^\d{1,20}$/.test(songId)) throw new AppleUpstreamError("songId 不是目录 ID");
   const id = songId;
   // v4：多了 songwriters 字段
