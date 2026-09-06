@@ -41,6 +41,7 @@ export function HeroMotionArtwork({
   videoUrl,
   placeholder,
   reduced = false,
+  sizePx = 80,
 }: {
   artwork: string | null;
   title: string;
@@ -48,6 +49,11 @@ export function HeroMotionArtwork({
   /** 首屏低清占位，见 lib/artwork-placeholder；没有就传 undefined，退回 empty */
   placeholder?: ArtworkDataUri;
   reduced?: boolean;
+  /**
+   * 边长。卡片 hero 是 80；网页播放器弹窗用 96 —— 那边预载的封面就是按 96 取的
+   * （见 web-player/player-artwork），这里的 `<Image>` 必须按同一尺寸拼地址才能命中。
+   */
+  sizePx?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -189,7 +195,8 @@ export function HeroMotionArtwork({
 
   return (
     <div
-      className="relative aspect-square w-20 shrink-0 overflow-hidden rounded-md border border-line bg-muted"
+      className="relative aspect-square shrink-0 overflow-hidden rounded-md border border-line bg-muted"
+      style={{ width: sizePx }}
       /*
        * 不垫主色纯色块 —— 上过一次线又撤下来的教训：占位解码滑档那一两帧会
        * 闪出一整块显眼色块，比 bg-muted 的灰底更扎眼，等于把加载过程演出来。
@@ -220,17 +227,17 @@ export function HeroMotionArtwork({
             alt=""
             aria-hidden
             fill
-            sizes="80px"
+            sizes={`${sizePx}px`}
             className="object-cover"
             decoding="sync"
           />
         )}
         {artwork && (
           <Image
-            src={appleArtwork(artwork, 80 * ARTWORK_SCALE)!}
+            src={appleArtwork(artwork, sizePx * ARTWORK_SCALE)!}
             alt={`${title} 封面`}
             fill
-            sizes="80px"
+            sizes={`${sizePx}px`}
             // 这张是全站 LCP 元素：默认的 lazy 会让预加载扫描器跳过它
             loading="eager"
             fetchPriority="high"
@@ -253,7 +260,7 @@ export function HeroMotionArtwork({
              * 静态封面上，这一层在任何时刻都和底下那张图长得一样：占位符没了，
              * 动态接管的那一下也不会闪。
              */
-            poster={artwork ? (appleArtwork(artwork, 80 * ARTWORK_SCALE) ?? undefined) : undefined}
+            poster={artwork ? (appleArtwork(artwork, sizePx * ARTWORK_SCALE) ?? undefined) : undefined}
             className={cn(
               "absolute inset-0 size-full object-cover transition-opacity duration-[1.2s] ease-[cubic-bezier(0.45,0,0.55,1)]",
               isPlaying ? "opacity-100" : "pointer-events-none opacity-0",

@@ -67,6 +67,8 @@ export type MediaItemAttributes = {
   /** 模板 URL，尺寸由取图的一侧填，见 lib/apple-artwork */
   artwork?: { url?: string };
   url?: string;
+  /** 目录说这首有没有歌词。和 NowListeningPayload.hasLyrics 同一个来源，没有就不去问 /api/lyrics */
+  hasLyrics?: boolean;
 };
 export type MediaItem = { id?: string; attributes?: MediaItemAttributes };
 /** setQueue 接受的几种形态，只列用到的。startTime 被否决（见下面接口上的注释），别加回来 */
@@ -84,6 +86,7 @@ export type QueueOptions = {
 /** 用到的那部分 MusicKit 实例接口。Apple 没发布类型包，按官方文档手写 */
 export type MusicKitInstance = {
   isAuthorized: boolean;
+  storefrontId?: string;
   /** 见 PLAYBACK_STATE */
   playbackState: number;
   /** 播放进度，**秒**（站点内部一律毫秒，边界在 use-listen-along 里换算） */
@@ -98,6 +101,12 @@ export type MusicKitInstance = {
   autoplayEnabled?: boolean;
   /** 见 REPEAT_MODE。单曲循环是 one，跟听平时是 none */
   repeatMode?: number;
+  api?: {
+    music?: (
+      path: string,
+      query?: Record<string, unknown>,
+    ) => Promise<{ data?: { data?: unknown[]; [key: string]: unknown } | unknown[] }>;
+  };
   authorize(): Promise<string>;
   unauthorize(): Promise<void>;
   /*
