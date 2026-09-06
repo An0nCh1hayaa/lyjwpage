@@ -14,6 +14,8 @@ on:
     paths:
       - "workers/**"
       - "src/lib/**"
+      - "shared/**"
+      - "tsconfig.json"
       - "package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/deploy-workers.yml"
@@ -48,7 +50,7 @@ jobs:
           else
             names=$(git diff --name-only "$before" "$GITHUB_SHA" -- workers/ | cut -d/ -f2 | sort -u)
             # ingest 直接打包共享 store；只改主站目录也必须同步发布写侧。
-            if git diff --name-only "$before" "$GITHUB_SHA" -- src/lib/ package.json pnpm-lock.yaml | awk 'END { exit NR == 0 }'; then
+            if git diff --name-only "$before" "$GITHUB_SHA" -- src/lib/ shared/ tsconfig.json package.json pnpm-lock.yaml | awk 'END { exit NR == 0 }'; then
               names=$(printf '%s\ningest\n' "$names" | sort -u)
             fi
           fi

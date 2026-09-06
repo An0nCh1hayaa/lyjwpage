@@ -1,8 +1,19 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import { ingestFailed, telemetryAuthorized } from "@/lib/api";
-import { expireStatusTags } from "@/lib/live-platform";
+import { expireStatusTags } from "@/lib/status-revalidation";
 import { parseRevalidateRequest } from "@/lib/revalidate-request";
+
+function failure(error: string, status: number) {
+  return NextResponse.json({ ok: false, error }, { status });
+}
+
+function authorized(request: Request, expected: string) {
+  const actual = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const expectedBytes = Buffer.from(expected);
+  const actualBytes = Buffer.from(actual);
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
 
 /**
  * Worker 处理完一次上报之后，让这份部署的 `'use cache'` 过期。
@@ -16,20 +27,21 @@ import { parseRevalidateRequest } from "@/lib/revalidate-request";
  * 没有「本地开发不配密钥」的场景。
  */
 export async function POST(request: Request) {
-  if (!process.env.TELEMETRY_INGEST_SECRET) {
-    return ingestFailed("站点未配置 TELEMETRY_INGEST_SECRET", 503);
+  const secret = process.env.TELEMETRY_INGEST_SECRET;
+  if (!secret) {
+    return failure("站点未配置 TELEMETRY_INGEST_SECRET", 503);
   }
-  if (!telemetryAuthorized(request)) return ingestFailed("未授权", 401);
+  if (!authorized(request, secret)) return failure("未授权", 401);
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return ingestFailed("请求体不是合法 JSON", 400);
+    return failure("请求体不是合法 JSON", 400);
   }
 
   const parsed = parseRevalidateRequest(body);
-  if (!parsed.ok) return ingestFailed(parsed.error, 400);
+  if (!parsed.ok) return failure(parsed.error, 400);
 
   const { tags, urgentTags } = parsed.value;
   await expireStatusTags(tags, urgentTags);

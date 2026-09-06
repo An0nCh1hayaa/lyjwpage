@@ -2,14 +2,7 @@ import type { LiveEvent } from "@/lib/live-events";
 
 import { currentContext, requestStore } from "./runtime";
 
-/**
- * `@/lib/live-platform` 的 Worker 版，三个导出名和站点那份一致（见那边的说明）。
- *
- * - afterResponse：ctx.waitUntil。响应先回给上报器，落库、推送、失效在后面跑完。
- * - expireStatusTags：POST 站点的 /api/revalidate。`revalidateTag` 只能在 Next 进程里
- *   调，这是整条写路径上唯一一次回到站点。
- * - publish：直接进 Durable Object 广播，不再绕一次 HTTP 的 /publish。
- */
+/** Worker 后台任务、缓存失效通知和房间广播。 */
 
 export function afterResponse(work: () => Promise<void>): Promise<void> {
   const store = requestStore.getStore();

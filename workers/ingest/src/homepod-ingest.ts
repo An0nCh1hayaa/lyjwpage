@@ -1,6 +1,7 @@
-import { normalizeHomePodEvent, writeHomePodEvent } from "@/lib/homepod-store";
-import { fanout, NOW_LISTENING_TAG } from "@/lib/live-events";
-import { homePodListeningEvent } from "@/lib/telemetry";
+import { NOW_LISTENING_TAG } from "@/lib/live-events";
+import { fanout } from "@ingest/fanout";
+import { normalizeHomePodEvent, writeHomePodEvent } from "@ingest/stores/homepod-store";
+import { homePodListeningEvent } from "@ingest/stores/telemetry";
 
 /**
  * Home Assistant 推来的 HomePod 曲目和播放状态变化。

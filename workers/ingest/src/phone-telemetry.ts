@@ -1,6 +1,7 @@
-import { normalizeActivity, writeActivity } from "@/lib/activity";
 import { object } from "@/lib/json";
-import { ACTIVITY_TAG, fanout } from "@/lib/live-events";
+import { ACTIVITY_TAG } from "@/lib/live-events";
+import { fanout } from "@ingest/fanout";
+import { normalizeActivity, writeActivity } from "@ingest/stores/activity";
 
 /**
  * iPhone 遥测中心的信封。

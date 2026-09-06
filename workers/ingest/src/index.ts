@@ -1,45 +1,27 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { recordEmbyReport } from "@/lib/emby";
-import { recordHomePodEvent } from "@/lib/homepod-ingest";
-import { relayIngest } from "@/lib/ingest-relay";
-import { recordPhoneEnvelope } from "@/lib/phone-telemetry";
-import { recordPlaystationReport } from "@/lib/playstation";
 import { withRedisScope } from "@/lib/redis";
-import { recordServerReport } from "@/lib/server";
-import { recordTelemetryEnvelope } from "@/lib/telemetry";
-import { recordAgentLimits } from "@/lib/vibecoding";
+import { recordHomePodEvent } from "./homepod-ingest";
+import { recordPhoneEnvelope } from "./phone-telemetry";
+import { recordEmbyReport } from "./stores/emby";
+import { recordPlaystationReport } from "./stores/playstation";
+import { recordServerReport } from "./stores/server";
+import { recordTelemetryEnvelope } from "./stores/telemetry";
+import { recordAgentLimits } from "./stores/vibecoding";
+
+import { refreshRecentlyPlayed } from "./apple-music-recent";
 
 import { ROOM_ID } from "./live-platform";
 import { requestStore, type Env } from "./runtime";
 
-/**
- * 上报入口 + 实时推送，一个 Worker。
- *
- * 上报器把信封 POST 到 `/api/ingest/<来源>`（路径和站点从前那几条一字不差，上报器只换
- * 源），这里鉴权、落 Redis、直接在 Durable Object 房间里广播给连在 `/ws` 上的浏览器、
- * 再回敲站点的 `/api/revalidate` 让 `'use cache'` 过期。落库和推送用的是站点 `src/lib`
- * 里同一批 store，wrangler 的 alias 只换掉三处依赖运行平台的模块（Redis 连接、缓存失效
- * 与推送、R2 校验），见 wrangler.toml。
- *
- * 站点不再持有写路径，也不持有任何长连接。它自己还会写的只剩「最近在听」那份自拉的
- * 列表，那一路走 `/publish`。
- *
- * 和隔壁 online-counter 分开部署：那个只数人头，谁连上谁断开就是全部输入；这个要接
- * 写入、要鉴权、要转发任意负载。两件事挤在一个 Worker 里的话，人数广播的改动会和
- * 写入的鉴权面互相牵连。
- */
+/** 接收所有上报，在 Worker 内写 Redis、广播 WebSocket，再通知 Vercel 缓存失效。 */
 
 export type { Env };
 
 const WS_PATH = "/ws";
-const PUBLISH_PATH = "/publish";
 const INGEST_PREFIX = "/api/ingest/";
 
-/**
- * 来源 → 处理器。加一个来源就加一行，路径和站点 app/api/ingest/<来源>/route.ts 同名。
- * 每个 record* 自己决定落哪些键、推哪些事件、失效哪些 tag（lib/live-events 的 fanout）。
- */
+/** 来源名称是对外契约，处理器只存在于此 Worker。 */
 const HANDLERS: Record<string, (body: unknown) => Promise<unknown>> = {
   mac: recordTelemetryEnvelope,
   iphone: recordPhoneEnvelope,
@@ -156,7 +138,7 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 解析失败统一抛这一句，和站点 lib/api 的 parseBody 同一句 —— 上报器看到的文案不因入口而异 */
+/** 统一 JSON 错误文案。 */
 function parseBody(raw: string): unknown {
   try {
     return JSON.parse(raw) as unknown;
@@ -165,16 +147,7 @@ function parseBody(raw: string): unknown {
   }
 }
 
-/**
- * 一条上报：鉴权、读请求体、转给对端、落库扇出、统一响应。对应站点 lib/api 的 ingestRoute。
- *
- * **没配密钥一律 503，不放行。** 站点那份不配就放行是给本地开发留的；这里是公网上的
- * 一个写入口，背后是生产 Redis，没有那种场景。
- *
- * 成功一律 202：数据已收下，落库、推送、缓存失效、转给对端全在响应之后跑（waitUntil），
- * 200 会给人「全部生效」的错觉。handler 抛出来的按 400 —— 到这一步还失败的都是 payload
- * 本身的问题，上报器重发同一份也不会变好。
- */
+/** 鉴权与解析在响应前完成；202 表示接收，写入、推送和失效通过 waitUntil 完成。 */
 async function handleIngest(
   request: Request,
   env: Env,
@@ -206,10 +179,6 @@ async function handleIngest(
   }
 
   return requestStore.run({ env, ctx }, () => {
-    // 转发和落库一样不在上报器的等待里。relayIngest 自己看 x-ingest-relay 决定转不转、
-    // 看 INGEST_PEERS 决定转给谁；这里只管把它挪到响应之后。
-    ctx.waitUntil(relayIngest(request, raw));
-
     return withRedisScope(async () => {
       try {
         const data = await handler(parseBody(raw));
@@ -292,13 +261,13 @@ export class LivePushRoom extends DurableObject<Env> {
         // 1001 = going away。关不掉（已经断了）就算了，运行时随后会清理
         try {
           socket.close(1001, "静默过久");
-        } catch {}
+        } catch { }
       }
     }
     return alive;
   }
 
-  async webSocketMessage(): Promise<void> {}
+  async webSocketMessage(): Promise<void> { }
 
   async webSocketClose(ws: WebSocket, code: number): Promise<void> {
     // 1005（没给关闭码）和 1006（没收到 close 帧）都是"保留码"：
@@ -308,6 +277,10 @@ export class LivePushRoom extends DurableObject<Env> {
 }
 
 const worker = {
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (!env.REDIS_URL || !(await getRoom(env).connectionCount())) return;
+    await requestStore.run({ env, ctx }, () => refreshRecentlyPlayed());
+  },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
@@ -330,43 +303,11 @@ const worker = {
       if (request.headers.get("Upgrade") !== "websocket") {
         return new Response("Expected WebSocket upgrade", { status: 426 });
       }
-      return getRoom(env).fetch(request);
-    }
-
-    if (url.pathname === PUBLISH_PATH) {
-      if (request.method !== "POST") {
-        return jsonResponse({ ok: false, error: "只接受 POST" }, { status: 405, headers: cors });
+      const response = await getRoom(env).fetch(request);
+      if (response.status === 101 && env.REDIS_URL) {
+        await requestStore.run({ env, ctx }, () => refreshRecentlyPlayed());
       }
-
-      const expected = env.LIVE_PUSH_SECRET;
-      if (!expected) {
-        return jsonResponse(
-          { ok: false, error: "Worker 未配置 LIVE_PUSH_SECRET" },
-          { status: 503, headers: cors },
-        );
-      }
-      const provided = bearerToken(request);
-      if (!provided || !secretMatches(provided, expected)) {
-        return jsonResponse({ ok: false, error: "未授权" }, { status: 401, headers: cors });
-      }
-
-      let event: unknown;
-      try {
-        event = await request.json();
-      } catch {
-        return jsonResponse({ ok: false, error: "请求体不是合法 JSON" }, { status: 400, headers: cors });
-      }
-      if (
-        typeof event !== "object" ||
-        event === null ||
-        typeof (event as { type?: unknown }).type !== "string" ||
-        !(event as { type: string }).type
-      ) {
-        return jsonResponse({ ok: false, error: "事件缺少 type" }, { status: 400, headers: cors });
-      }
-
-      const delivered = await getRoom(env).broadcast(JSON.stringify(event));
-      return jsonResponse({ ok: true, delivered }, { headers: cors });
+      return response;
     }
 
     if (url.pathname === "/count") {

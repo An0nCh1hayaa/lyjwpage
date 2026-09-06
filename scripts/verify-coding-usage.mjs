@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import Redis from "ioredis";
 
 const { values } = parseArgs({ options: {
+  ingest: { type: "string", default: "http://127.0.0.1:8787" },
   base: { type: "string", default: "http://localhost:3211" },
   "redis-url": { type: "string", default: "redis://127.0.0.1:6389" },
   "redis-prefix": { type: "string" },
@@ -13,8 +14,8 @@ const { values } = parseArgs({ options: {
   help: { type: "boolean" },
 } });
 if (values.help) {
-  console.log("node scripts/verify-coding-usage.mjs --redis-prefix <isolated-dev-prefix> [--snapshot <Mac CLI JSON>] [--base http://localhost:3211] [--redis-url redis://127.0.0.1:6389]");
-  console.log("Requires a dedicated local dev server, its isolated Redis, and TELEMETRY_INGEST_SECRET=local-token-usage-verification; peers/push must be disabled. Leaves the input snapshot (or synthetic baseline) installed and restores prior limits.");
+  console.log("node scripts/verify-coding-usage.mjs --redis-prefix <isolated-dev-prefix> [--snapshot <Mac CLI JSON>] [--base http://localhost:3211] [--ingest http://127.0.0.1:8787] [--redis-url redis://127.0.0.1:6389]");
+  console.log("Requires dedicated local Next and Worker servers with the same isolated Redis, and TELEMETRY_INGEST_SECRET=local-token-usage-verification; production services must not be configured. Leaves the input snapshot (or synthetic baseline) installed and restores prior limits.");
   process.exit(0);
 }
 
@@ -28,6 +29,8 @@ function localURL(value, protocol) {
 }
 const base = localURL(values.base, "http:");
 assert.equal(base.pathname, "/", "The HTTP target must be an origin");
+const ingest = localURL(values.ingest, "http:");
+assert.equal(ingest.pathname, "/");
 const redisURL = localURL(values["redis-url"], "redis:");
 assert.ok(redisURL.port && redisURL.port !== "6379", "Use an explicit, dedicated Redis port other than 6379");
 const prefix = values["redis-prefix"];
@@ -78,7 +81,7 @@ function envelope(snapshot, parts = ["usage", "now", "year"]) {
   return { version: 4, heartbeatAt: Date.now(), presence: "online", activeModules: ["vibeCoding"], modules: Object.fromEntries(parts.map((part) => [names[part], snapshot[part]])) };
 }
 async function request(path, body, authorization = secret) {
-  const response = await fetch(new URL(path, base), {
+  const response = await fetch(new URL(path, path.startsWith("/api/ingest/") ? ingest : base), {
     method: body === undefined ? "GET" : "POST",
     headers: { "content-type": "application/json", ...(authorization ? { authorization: `Bearer ${authorization}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),

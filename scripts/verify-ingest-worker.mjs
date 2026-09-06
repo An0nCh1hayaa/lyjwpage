@@ -48,7 +48,7 @@ try {
   await eventually(() => redis.ping());
   const vars = {
     REDIS_URL: redisUrl, REDIS_PREFIX: 'isolated-ingest', TELEMETRY_INGEST_SECRET: secret,
-    LIVE_PUSH_SECRET: secret, SITE_URL: site, INGEST_PEERS: '', ALLOWED_ORIGINS: '',
+    SITE_URL: site, ALLOWED_ORIGINS: '',
     R2_PUBLIC_BASE_URL: '', EMBY_PUBLIC_URL: '',
   };
   // Config lives outside the checkout so Wrangler cannot load real .dev.vars or production bindings.
@@ -56,26 +56,33 @@ try {
     name: 'isolated-ingest', main: join(root, 'workers/ingest/src/index.ts'),
     compatibility_date: '2025-02-14', compatibility_flags: ['nodejs_compat', 'nodejs_compat_populate_process_env'],
     vars,
-    alias: Object.fromEntries(['redis-driver', 'live-platform', 'r2-assets'].map(name => [`@/lib/${name}`, join(root, `workers/ingest/src/${name}.ts`)])),
+    alias: Object.fromEntries(['redis-driver'].map(name => [`@/lib/${name}`, join(root, `workers/ingest/src/${name}.ts`)])),
     durable_objects: { bindings: [{ name: 'LIVE_PUSH', class_name: 'LivePushRoom' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['LivePushRoom'] }],
     r2_buckets: [{ binding: 'IMAGES', bucket_name: 'isolated-images' }],
   };
   const configPath = join(temporary, 'wrangler.json');
   await writeFile(configPath, JSON.stringify(config));
-  start(process.execPath, [require.resolve('wrangler'), 'dev', '--config', configPath, '--port', String(workerPort), '--persist-to', join(temporary, 'state')]);
+  start(process.execPath, [require.resolve('wrangler'), 'dev', '--config', configPath, '--port', String(workerPort), '--test-scheduled', '--persist-to', join(temporary, 'state')]);
   start(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'start', '-p', String(sitePort)], {
     ...vars, VERCEL: '', NEXT_PUBLIC_LIVE_PUSH_URL: '', NEXT_PUBLIC_ONLINE_COUNTER_URL: '', GITHUB_TOKEN: '',
   });
   await eventually(async () => assert.equal((await fetch(`${worker}/count`)).status, 200));
   await eventually(async () => assert.equal((await fetch(`${site}/api/status/listening/now`)).status, 200));
+  const refreshKey = 'isolated-ingest:cache:apple-music:recent:refresh:v1';
+  assert.equal((await fetch(`${worker}/__scheduled`)).status, 200);
+  assert.equal(await redis.get(refreshKey), null, 'No viewers: scheduled refresh must not run');
   const events = [];
   socket = new WebSocket(`${worker.replace('http:', 'ws:')}/ws`);
   socket.addEventListener('message', e => events.push(JSON.parse(e.data)));
   await once(socket, 'open');
+  await eventually(async () => assert.equal(await redis.get(refreshKey), '1'));
+  console.log('PASS: site reads do not refresh; scheduled refresh skips no-viewer periods; WebSocket starts the two-minute gate');
   async function post(base, path, body, token = secret) {
     return fetch(`${base}${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
   }
+  assert.equal((await post(site, '/api/ingest/mac', {})).status, 404);
+  assert.equal((await post(worker, '/publish', { type: 'presence', payload: null })).status, 404);
   assert.equal((await post(worker, '/api/ingest/homepod', {}, 'wrong')).status, 401);
   assert.equal((await post(worker, '/api/ingest/constructor', {})).status, 404);
   assert.equal((await post(worker, '/api/ingest/mac', {})).status, 400);

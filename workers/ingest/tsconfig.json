@@ -3,19 +3,34 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ESNext"],
-    "types": ["@cloudflare/workers-types", "node"],
+    "lib": [
+      "ESNext"
+    ],
+    "types": [
+      "@cloudflare/workers-types",
+      "node"
+    ],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "@/lib/redis-driver": ["./src/redis-driver.ts"],
-      "@/lib/live-platform": ["./src/live-platform.ts"],
-      "@/lib/r2-assets": ["./src/r2-assets.ts"],
-      "@/*": ["../../src/*"]
+      "@/lib/redis-driver": [
+        "./src/redis-driver.ts"
+      ],
+      "@/*": [
+        "../../src/*"
+      ],
+      "@shared/*": [
+        "../../shared/*"
+      ],
+      "@ingest/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

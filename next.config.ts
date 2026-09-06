@@ -31,17 +31,6 @@ function resolveCommitSha(): string {
 }
 
 const nextConfig: NextConfig = {
-  /** Vercel 在路由层把上报交给 Worker；EdgeOne 和本地仍使用自己的处理器。 */
-  rewrites() {
-    const ingest = process.env.NEXT_PUBLIC_LIVE_PUSH_URL?.replace(/\/+$/, "");
-    return {
-      beforeFiles: process.env.VERCEL === "1" && ingest
-        ? [{ source: "/api/ingest/:path*", destination: `${ingest}/api/ingest/:path*` }]
-        : [],
-      afterFiles: [],
-      fallback: [],
-    };
-  },
   env: {
     BUILD_TIME,
     COMMIT_SHA: resolveCommitSha(),

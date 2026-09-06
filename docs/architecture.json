@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Mac 上报与 Vercel 读取",
+    "title": "上报写入与 Vercel 读取",
     "locale": "zh-CN",
     "output": "docs/architecture.html",
     "quality_profile": "showcase",
@@ -10,20 +10,16 @@
       1390,
       820
     ],
-    "repository": {
-      "url": "https://github.com/LYJW131/lyjwpage",
-      "revision": "7994424debed99c21a931944b446dd7e946eef3c"
-    },
     "views": [
       {
         "id": "write",
         "label": "上报写入",
         "focus": [
-          "mac",
+          "reporters",
           "worker",
           "redis"
         ],
-        "note": "Mac 直连 ingest Worker。Worker 接收模块、写入 Redis。"
+        "note": "七个来源统一直连 Worker；解析与状态写入仅在 Worker。"
       },
       {
         "id": "read",
@@ -43,17 +39,17 @@
           "site",
           "web"
         ],
-        "note": "Worker 回敲 /api/revalidate，并通过 /ws 直接推送浏览器。"
+        "note": "Worker 广播完整数据；写完 Redis 后通知 Vercel 缓存失效。"
       }
     ]
   },
   "components": [
     {
-      "id": "mac",
+      "id": "reporters",
       "type": "external",
-      "label": "Mac Telemetry Hub",
-      "sublabel": "本机采集 · 统一遥测信封",
-      "tag": "实际配置已直连",
+      "label": "全部上报器",
+      "sublabel": "设备遥测 · NAS · PlayStation",
+      "tag": "七个来源 · 统一入口",
       "pos": [
         60,
         105
@@ -61,18 +57,13 @@
       "size": [
         240,
         100
-      ],
-      "sources": [
-        {
-          "path": "src/app/api/ingest/mac/route.ts"
-        }
       ]
     },
     {
       "id": "worker",
       "type": "messagebus",
       "label": "ingest Worker",
-      "sublabel": "ingest.homepage.lyjw.llc",
+      "sublabel": "接收上报 · 刷新最近在听",
       "tag": "接收 · 写入 · 推送",
       "pos": [
         520,
@@ -81,14 +72,6 @@
       "size": [
         290,
         100
-      ],
-      "sources": [
-        {
-          "path": "workers/ingest/src/index.ts"
-        },
-        {
-          "path": "src/lib/live-events.ts"
-        }
       ]
     },
     {
@@ -104,11 +87,6 @@
       "size": [
         250,
         100
-      ],
-      "sources": [
-        {
-          "path": "workers/ingest/src/redis-client.ts"
-        }
       ]
     },
     {
@@ -124,14 +102,6 @@
       "size": [
         250,
         100
-      ],
-      "sources": [
-        {
-          "path": "src/lib/api.ts"
-        },
-        {
-          "path": "src/app/api/revalidate/route.ts"
-        }
       ]
     },
     {
@@ -147,23 +117,30 @@
       "size": [
         290,
         100
+      ]
+    },
+    {
+      "id": "apple",
+      "type": "external",
+      "label": "Apple Music API",
+      "sublabel": "最近播放列表",
+      "tag": "有连接时 · 两分钟节流",
+      "pos": [
+        60,
+        595
       ],
-      "sources": [
-        {
-          "path": "src/hooks/use-status.ts"
-        },
-        {
-          "path": "src/hooks/use-live-events.ts"
-        }
+      "size": [
+        240,
+        100
       ]
     }
   ],
   "connections": [
     {
       "id": "post",
-      "from": "mac",
+      "from": "reporters",
       "to": "worker",
-      "label": "POST /api/ingest/mac",
+      "label": "POST /api/ingest/*",
       "variant": "emphasis"
     },
     {
@@ -186,10 +163,6 @@
       "to": "web",
       "label": "SSR + /api/status/*",
       "variant": "default",
-      "labelAt": [
-        920,
-        765
-      ],
       "fromSide": "bottom",
       "toSide": "bottom",
       "via": [
@@ -201,6 +174,10 @@
           665,
           740
         ]
+      ],
+      "labelAt": [
+        920,
+        765
       ]
     },
     {
@@ -220,28 +197,35 @@
       "to": "site",
       "label": "POST /api/revalidate",
       "variant": "dashed"
+    },
+    {
+      "id": "recent",
+      "from": "worker",
+      "to": "apple",
+      "label": "拉取最近播放",
+      "variant": "default"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "Mac 直连",
+      "title": "七个上报来源",
       "items": [
-        "上报端点：ingest.homepage.lyjw.llc/api/ingest/mac"
+        "Mac、iPhone、HomePod、Emby、PlayStation、server、agents。"
       ]
     },
     {
       "dot": "emerald",
-      "title": "职责划分",
+      "title": "清晰的职责",
       "items": [
-        "Worker 接收、写入、推送；Vercel 读取状态并管理页面缓存。"
+        "Worker 写入和推送；Vercel 提供页面、状态读取和缓存失效。"
       ]
     },
     {
       "dot": "violet",
-      "title": "本图范围",
+      "title": "实例与图片",
       "items": [
-        "仅展示 Mac 上报链路；图片仍由 Mac 直传 R2。"
+        "iPhone 地址待用户修改；图片由上报器直传 R2，浏览器直读。"
       ]
     }
   ]

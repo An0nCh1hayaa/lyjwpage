@@ -1,21 +1,26 @@
 #!/usr/bin/env node
-/** Run against an isolated `next start`, with Redis/peers/push disabled. */
+/** Run against an isolated `next start`, and Worker sharing an isolated Redis. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
 const { values } = parseArgs({ options: {
+  ingest: { type: "string", default: "http://127.0.0.1:8787" },
   base: { type: "string", default: "http://127.0.0.1:3212" },
 } });
 const base = new URL(values.base);
 assert.equal(base.protocol, "http:");
 assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(base.hostname), "Only local test servers are allowed");
 assert.ok(!base.username && !base.password && !base.search && !base.hash && base.pathname === "/");
+const ingest = new URL(values.ingest);
+assert.equal(ingest.protocol, "http:");
+assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(ingest.hostname));
+assert.ok(!ingest.username && !ingest.password && !ingest.search && !ingest.hash && ingest.pathname === "/");
 const secret = "local-status-cache-verification";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function request(path, body, token = secret) {
-  return fetch(new URL(path, base), {
+  return fetch(new URL(path, path.startsWith("/api/ingest/") ? ingest : base), {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? {} : {
       "content-type": "application/json", authorization: `Bearer ${token}`,

@@ -40,7 +40,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 | 对象 | 约定 | 示例 / 边界 |
 | --- | --- | --- |
-| 上报入口 | `/api/ingest/<来源>`，来源按数据归属命名，不使用上报程序名；站点路由和 `workers/ingest` 同路径、同处理器，Vercel 那份只由 Worker 接 | 当前来源：`mac`、`iphone`、`homepod`、`emby`、`playstation`、`server`、`agents` |
+| 上报入口 | `/api/ingest/<来源>`，来源按数据归属命名，不使用上报程序名；仅由 `workers/ingest` 接收，站点不提供上报路由、rewrite 或转发 | 当前来源：`mac`、`iphone`、`homepod`、`emby`、`playstation`、`server`、`agents` |
 | 设备遥测 | 一台设备一个入口、一个信封、一个 `modules` 字典 | 充电头归观测它的 `mac`；活动圆环归搬运和观测它的 `iphone`，不按品牌或模块另开入口 |
 | 账号限额 | coding agent 的账号套餐和限额统一归 `agents` | 厂商账号事实不归某台 Mac，也不按采集容器命名 |
 | 上报器取数据 | 使用所属 ingest 路径的 GET，沿用相同鉴权 | 若返回凭据，`TELEMETRY_INGEST_SECRET` 就具有获取该凭据的权限，按同等敏感度处理 |

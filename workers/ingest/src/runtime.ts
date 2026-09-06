@@ -8,9 +8,7 @@ import type { LivePushRoom } from "./index";
 export interface Env {
   LIVE_PUSH: DurableObjectNamespace<LivePushRoom>;
   IMAGES: R2Bucket;
-  /** 站点 POST /publish 用的密钥。没配则 /publish 一律 503 */
-  LIVE_PUSH_SECRET?: string;
-  /** 上报器和对端转发用的密钥，也是回敲站点 /api/revalidate 的凭据。没配则上报入口一律 503 */
+  /** 上报器使用的密钥，也是回敲站点 /api/revalidate 的凭据。没配则上报入口一律 503 */
   TELEMETRY_INGEST_SECRET?: string;
   REDIS_URL?: string;
   /** 要失效缓存的那份站点，如 https://lyjw.me */
@@ -32,13 +30,7 @@ export type RequestContext = {
   redisLeases?: ConnectionLeases<RedisClient>;
 };
 
-/**
- * 当前请求的 env 和 ctx。
- *
- * 被 alias 进来的 live-platform / r2-assets / redis-driver 没有参数能接 env —— 它们的
- * 签名是站点那份定的。挂在 AsyncLocalStorage 上而不是模块变量：同一个 isolate 会并发
- * 处理多个请求，模块变量会把 A 的 waitUntil 挂到 B 的 ctx 上。
- */
+/** 每次请求或定时任务独立保存绑定、waitUntil 和 Redis 租约，避免并发作用域串用。 */
 export const requestStore = new AsyncLocalStorage<RequestContext>();
 
 export function currentContext(): RequestContext {

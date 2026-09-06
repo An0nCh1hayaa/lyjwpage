@@ -4,25 +4,17 @@ import {
   resolveCredentials,
   type Credentials,
 } from "@/lib/apple-music";
-import { prepareRecentlyPlayed } from "@/lib/apple-music-store";
 import { cached, claim } from "@/lib/cache";
-import { fanout, LISTENING_TAG } from "@/lib/live-events";
-import { afterResponse } from "@/lib/live-platform";
+import { LISTENING_TAG } from "@/lib/live-events";
 import { withRedisScope } from "@/lib/redis";
 import type { ListeningItem } from "@/lib/types";
+import { fanout } from "@ingest/fanout";
+import { prepareRecentlyPlayed } from "@ingest/stores/apple-music-store";
+import { afterResponse } from "./live-platform";
 
 /**
- * 「最近在听」：站点自己去 `api.music.apple.com` 拉那份列表。
- *
- * 全站两路没有上报方的数据之一（另一路是 GitHub 贡献日历）—— 没人推，只能自己拉。
- * 拉这件事在 NAS 上当过一阵常驻上报器，那是为了推断「此刻在不在听」：Apple 没有
- * 可查的当前播放接口，只能连续盯着列表第一项什么时候换人。那个推断已经撤了
- * （只在 Mac 和 HomePod 同时没声时才可能露面，而那时它说的话又没有把握），
- * 于是这里剩下的就是一件平平无奇的事：**按 TTL 取一份列表**。
- *
- * 刷新挂在访客的轮询上（`/api/status/listening/now` 每个可见标签页 60 秒一次），
- * 整块跑在响应之后：不新增函数调用，没人看时一次都不拉。「在不在播」一律只认
- * 设备实况（Mac / HomePod 推来的 LocalNowPlaying），这份列表只回答「听过什么」。
+ * Worker 刷新最近播放列表。连接建立时检查，cron 在有存活连接时每分钟检查。
+ * Redis 的两分钟闸门限制上游请求频率；站点只读取写好的结果。
  */
 
 /** 上游端点的硬限制就是 10，传更大直接 400 */
@@ -194,7 +186,7 @@ async function containerDuration(
     let total = 0;
     let url: string | undefined = `${href}?include=tracks`;
 
-    for (let page = 0; page < MAX_TRACK_PAGES && url; page += 1) {
+    for (let page = 0;page < MAX_TRACK_PAGES && url;page += 1) {
       const detail: ContainerDetail[] = await appleFetchList<ContainerDetail>(
         url.startsWith("http") ? url : `https://api.music.apple.com${url}`,
         credentials,
@@ -276,25 +268,7 @@ async function assemble(): Promise<ListeningItem[]> {
   return items;
 }
 
-/**
- * 该刷就刷一遍「最近在听」，整块跑在响应之后。
- *
- * 调用方是状态路由，它们**先调这一下、最后再 await 返回值**，和 ingestRoute 转发
- * 那条一个写法：`after()` 在有 waitUntil 的平台上立刻 resolve，没有的平台上才在
- * 那儿真等完（那时它和取数是并行的，不会串成两段）。访客的这次响应里给的仍是
- * 手上那份，刷出来的新列表由推送和缓存失效带给下一眼。
- *
- * 两道闸，一道挡问、一道挡拉：
- *
- * 1. 进程内那个时刻（见 attemptedAt）挡掉重复的提问，省下的是 Redis 往返；
- * 2. `claim()` 才是说了算的那道 —— `SET NX PX`，**先抢再拉**。这里不能用
- *    `cached()` 当闸门：它的值要等 loader 回来才写，取数那一两秒里闸门还是空的，
- *    别的实例照样穿过去（它的 in-flight 去重只在进程内）。TTL 边界上几个实例同时
- *    醒来时，那就是几次并发的上游调用，外加几次先后不定的落库。
- *
- * 抢到之后拉失败就空过这一段，不立刻重试：上游正病着的时候不该由下一个请求接着
- * 敲它。日志也因此是一次真尝试一行，不是一次请求一行。
- */
+/** 进程内节流减少 Redis 往返，SET NX PX 保证多个实例同一窗口只拉一次。 */
 export function refreshRecentlyPlayed(): Promise<void> {
   const now = Date.now();
   if (now - attemptedAt < RECENT_REFRESH_MS) return Promise.resolve();
@@ -306,22 +280,7 @@ export function refreshRecentlyPlayed(): Promise<void> {
 
       try {
         const { changed, listening, commit } = await prepareRecentlyPlayed(await assemble());
-        /**
-         * 落库、推送、失效三件事的先后规则在 fanout 里，这边不重写一遍。
-         *
-         * 它自己也会往 `after()` 里塞 —— 而我们已经在一个 after 回调里了。嵌不
-         * 进去时 afterResponse 会退回就地跑完，反正这一整块本来就在响应之后。
-         *
-         * 只在内容真的变了时推：列表没动的那几轮跟着发就成了定时广播。
-         *
-         * 失效走 urgent（`{ expire: 0 }`）而不是留宽限期，因为**这一路的刷新就
-         * 发生在读的那次请求里**：手上一份都没有时，那次请求会先把一个降级信封
-         * （`ok: false`）冻进 `'use cache'`，紧接着才把数据落库。留宽限期的话，
-         * 随后的轮询拿到的仍是那份冻住的降级信封 —— 而 `freshest` 见了 `ok: false`
-         * 会**主动删掉**记着的那份好数据（那是有意的：上游真挂了就该让页面看见），
-         * 于是刚被推送点亮的卡片会翻回「Apple Music 未连接」。urgent 让下一次请求
-         * 必须重算，那份冻住的降级信封就没机会被端出去。
-         */
+        // 完整数据可并行广播；缓存失效必须等写完，避免重新缓存旧结果。
         await fanout({
           writes: [commit()],
           events: changed ? [{ type: "listening", payload: listening }] : [],

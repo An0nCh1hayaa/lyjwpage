@@ -12,7 +12,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1107.0",
     "@clock-ui/react": "^0.1.2",
     "@lobehub/icons": "^5.16.0",
     "@number-flow/react": "^0.6.2",

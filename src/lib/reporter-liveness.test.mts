@@ -1,3 +1,4 @@
+import { writeLiveness } from "@ingest/stores/reporter-liveness";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -7,7 +8,6 @@ import {
   nextLiveness,
   offlineByLiveness,
   readLiveness,
-  writeLiveness,
 } from "@/lib/reporter-liveness";
 import { FakeRedis } from "@/lib/testing/fake-redis";
 

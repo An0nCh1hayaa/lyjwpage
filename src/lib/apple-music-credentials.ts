@@ -1,4 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
+import { type StoredAppleMusicCredentialState, mirror } from "@shared/apple-music-credentials";
 
 /**
  * Mac 上报器送来的 Apple Music 凭据。
@@ -20,39 +20,6 @@ export type StoredAppleMusicCredentials = {
   /** 收到的时刻，Unix 毫秒 */
   receivedAt: number;
 };
-
-export type AppleMusicCredentialsUpdate = {
-  musicUserToken?: string;
-  developerToken?: string;
-  /** developerToken 出现时必须一起更新 */
-  expiresAt?: number;
-  receivedAt: number;
-};
-
-type StoredAppleMusicCredentialState = {
-  musicUserToken?: string;
-  developerToken?: string;
-  expiresAt?: number;
-  receivedAt: number;
-};
-
-const mirror = mirrorKey<StoredAppleMusicCredentialState>(
-  ["apple-music", "credentials"],
-  (value) => value.receivedAt,
-);
-
-export async function putAppleMusicCredentials(
-  update: AppleMusicCredentialsUpdate,
-): Promise<void> {
-  const previous = await mirror.get();
-  const musicUserToken = update.musicUserToken ?? previous?.musicUserToken;
-  const developerToken = update.developerToken ?? previous?.developerToken;
-  const expiresAt = update.expiresAt ?? previous?.expiresAt;
-
-  // 半成品也要存：两个字段是独立变化、独立发送的，Redis 恰好清空后收到的第一
-  // 个字段不能丢。读取侧只有凑齐后才会把它交给 Apple API。
-  await mirror.put({ musicUserToken, developerToken, expiresAt, receivedAt: update.receivedAt });
-}
 
 function completeCredentials(
   state: StoredAppleMusicCredentialState | null,
@@ -81,3 +48,4 @@ export async function readAppleMusicCredentials(): Promise<
   if (credentials) return { ok: true, credentials };
   return { ok: false, reason: (await mirror.reachable()) ? "never-pushed" : "redis-unreachable" };
 }
+export { type AppleMusicCredentialsUpdate } from "@shared/apple-music-credentials";

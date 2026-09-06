@@ -1,5 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
-import type { WatchingItem } from "@/lib/types";
+import { currentMirror, type EmbyNowPlaying, imagesMirror, mirror, resumeMirror } from "@shared/emby-store";
 
 /**
  * Emby 的全部状态，一律由 NAS 上的推送代理送进来（reporters/emby-reporter）。
@@ -9,48 +8,6 @@ import type { WatchingItem } from "@/lib/types";
 
 /** Emby 的 tick 是 100 纳秒，1 毫秒 = 10000 tick */
 export const TICKS_PER_MS = 10_000;
-
-/** 事件之间可能隔很久（一部电影两小时只有首尾两条），保留时间要足够宽 */
-const TTL_MS = 6 * 60 * 60 * 1000;
-
-/**
- * 续播列表和图片映射留得久一些。
- *
- * 它们只在代理有变化时才推，一部剧看完到下一次开播中间可能好几天都没有新推送；
- * 按会话那档 6 小时算的话，页面会在没人看片的日子里空掉。
- */
-const LIBRARY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-/**
- * 播放中的位置状态。
- *
- * 代理有两个触发源：Emby 转发过来的播放事件（开始/暂停/继续/停止），以及它自己
- * 每 2 秒查一次会话 —— 拖动进度条 Emby 不发任何通知，只能查出来。
- */
-export type EmbyNowPlaying = {
-  itemId: string;
-  paused: boolean;
-  /** 事件发生时的播放位置 */
-  positionTicks: number;
-  /** 该条目总时长，0 表示未知 */
-  runTimeTicks: number;
-  device: string;
-  /** 事件到达时刻，毫秒 */
-  at: number;
-};
-
-/** Redis 为主、进程内存为辅，规则见 lib/redis 的 mirrorKey */
-const mirror = mirrorKey<EmbyNowPlaying>(["emby", "nowPlaying"], (state) => state.at, {
-  ttlMs: TTL_MS,
-});
-
-export async function setNowPlaying(state: EmbyNowPlaying) {
-  await mirror.put(state);
-}
-
-export async function clearNowPlaying() {
-  await mirror.drop();
-}
 
 export type ResolvedNowPlaying = {
   itemId: string;
@@ -127,79 +84,15 @@ function clampPercent(value: number) {
   return Math.min(100, Math.max(0, value));
 }
 
-/**
- * 存下来的一项，图片位上放的是「图片键」而不是地址。
- *
- * 键到地址的映射单独存（见下面的 images 镜像），落地时不把地址烧进条目里 ——
- * 图片和列表是分两次推来的：列表先到、图片可能还在路上，或者 Redis 被清空后
- * 只需补推图片。地址在读取时才解析，晚到的那批图能把已经存着的列表一起点亮，
- * 不用把整个列表重推一遍。
- */
-export type StoredWatchingItem = Omit<WatchingItem, "poster" | "backdrop"> & {
-  posterKey: string | null;
-  backdropKey: string | null;
-};
-
-const resumeMirror = mirrorKey<{ items: StoredWatchingItem[]; at: number }>(
-  ["emby", "resume"],
-  (state) => state.at,
-  { ttlMs: LIBRARY_TTL_MS },
-);
-
-export async function setResume(items: StoredWatchingItem[]) {
-  await resumeMirror.put({ items, at: Date.now() });
-}
-
 export async function getResume() {
   return resumeMirror.get();
-}
-
-/**
- * 播放中那一项的详情，和 nowPlaying 分开存。
- *
- * 合在一起的话，Emby 的 webhook（它只知道 id、位置和设备）每来一条暂停/继续
- * 就会把代理推来的详情覆盖掉。两份各写各的，读的时候按 itemId 对上即可。
- */
-const currentMirror = mirrorKey<{ item: StoredWatchingItem; at: number }>(
-  ["emby", "current"],
-  (state) => state.at,
-  { ttlMs: TTL_MS },
-);
-
-export async function setCurrentItem(item: StoredWatchingItem) {
-  await currentMirror.put({ item, at: Date.now() });
 }
 
 export async function getCurrentItem() {
   return currentMirror.get();
 }
 
-/**
- * 图片键 → R2 对象键。
- *
- * 键由代理按 Emby 的 ImageTag 拼出来，图换了键就换，所以映射只增不改。
- * 有上限是因为它只是「代理不必重复上传」的备忘：条目掉出去了，代理下一次
- * 推送会从响应里的 missingImages 得知，把图再传一遍。
- */
-const IMAGE_LIMIT = 96;
-
-const imagesMirror = mirrorKey<{ objectKeys: Record<string, string>; at: number }>(
-  ["emby", "images"],
-  (state) => state.at,
-  { ttlMs: LIBRARY_TTL_MS },
-);
-
 export async function getImageObjectKeys(): Promise<Record<string, string>> {
   return (await imagesMirror.get())?.objectKeys ?? {};
 }
-
-/** 返回真正落库的那一份：调用方拿它去拼回执和推送，两边看到的裁剪结果才一致 */
-export async function setImageObjectKeys(
-  objectKeys: Record<string, string>,
-): Promise<Record<string, string>> {
-  // 对象的键保持插入顺序，超了就从最早的开始丢
-  const entries = Object.entries(objectKeys).slice(-IMAGE_LIMIT);
-  const trimmed = Object.fromEntries(entries);
-  await imagesMirror.put({ objectKeys: trimmed, at: Date.now() });
-  return trimmed;
-}
+export { type EmbyNowPlaying, type StoredWatchingItem } from "@shared/emby-store";

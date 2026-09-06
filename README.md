@@ -42,80 +42,38 @@ pnpm dev
 
 分不清哪个是哪个时看响应头：Vercel 是 `server: Vercel`，EdgeOne 是 `Server: edgeone-pages`。
 
-### Vercel 那份只读：写路径在 Worker 上
+### Vercel 读取，Worker 接收上报
 
-Vercel 那份站点**不再接上报**。上报、写 Redis、推给浏览器这条路整个搬到了
-`workers/ingest`（前身是只管推送的 `live-push`）：上报器把信封 POST 到它的
-`/api/ingest/<来源>`（路径和站点从前那几条一字不差，上报器只换源），它鉴权、写
-Vercel 那份 Redis、直接在自己的 Durable Object 房间里广播、再回敲站点的
-`POST /api/revalidate` 让 `'use cache'` 过期。落库和推送跑的是站点 `src/lib` 里**同一批
-store**，wrangler 打包时只用 `alias` 换掉 Redis 连接、缓存失效与推送、R2 校验三个依赖
-运行平台的模块 —— 见那边的 README。
+所有上报器直连 `https://ingest.homepage.lyjw.llc/api/ingest/<来源>`。
+`workers/ingest/src/stores/` 负责解析、写 Redis；`fanout.ts` 负责广播和通知缓存失效。
+站点仅提供页面、状态读取和 `POST /api/revalidate`，没有上报路由、rewrite、中继或事件发布入口。
 
 ```text
-上报器 ──▶ ingest Worker ──▶ Vercel 的 Redis / 自己的房间 / POST lyjw.me/api/revalidate
-                └─转发─▶ EdgeOne /api/ingest/* ──▶ 自己的 Redis / 自己的 live-push / 自己的 tag
+上报器 ──▶ ingest Worker ──▶ Redis ◀── Vercel ──▶ 浏览器
+                 ├── WebSocket ─────────────────▶ 浏览器
+                 └── POST /api/revalidate ───────▶ Vercel
 ```
 
-`/api/revalidate` 只传 tag 名单（普通 + urgent，语义和 `lib/live-events` 的 fanout 一致），
-不传数据 —— 数据早在 Redis 里了，下一次读自己会去拿。它是整条写路径上唯一一次回到站点的
-HTTP，只接受 `lib/live-events` 里 `STATUS_TAGS` 名单内的 tag，鉴权沿用
-`TELEMETRY_INGEST_SECRET`，没配密钥一律 503。从前也有过一个只传缓存失效的端点，删掉的
-理由是那时数据本身还靠两边共用一个 Redis 才对得上；现在数据由 Worker 外部写入，tag
-通知是唯一剩下的跨边界事件，理由成立了。
+`shared/` 保存读写共用的 Redis 键、类型和状态计算；`src/lib/` 提供读取与页面数据组装。
+Worker 只为共用 Redis 工具替换 TCP 驱动，使用自己的 R2 绑定确认图片存在。
+图片仍由上报器直传 R2，浏览器直接读取。
 
-### 两份生产之间靠传播上报对齐
+`/api/revalidate` 只接收普通与 urgent tag，不接收上报数据。Worker 等写入完成后调用它；
+普通 tag 使页面和 API 后台刷新，urgent tag 使 API 立即失效。鉴权使用
+`TELEMETRY_INGEST_SECRET`，未配置返回 503。站点不再配置 `LIVE_PUSH_SECRET` 或 `INGEST_PEERS`。
 
-上报器统一直连 ingest Worker，而两份生产各有各的 Redis、各有各的推送房间、各有各的 Next
-缓存。所以**收到上报的那份除了自己落库，还会把同一个请求原样转给对面**：对面进的是同一
-条路径、同一个 handler，于是它写自己的 Redis、推自己的房间、刷自己的 tag —— 三件事都在它
-自己那边发生，没有谁远程指挥谁。国内那份（EdgeOne）**目前仍跑站点自己的 `/api/ingest/*`**，
-它接收 Worker 的单跳转发。旧的站点上报地址不再作为上报器的生产配置；
-Vercel rewrite 暂时只为国内侧尚未迁移的中继保留。
+Apple Music 最近播放列表也由 Worker 刷新：页面建立 WebSocket 连接时检查一次，
+cron 每分钟在有存活连接时检查，Redis 闸门限制为至少两分钟拉取一次；无人连接时不拉。
+读取侧的目录、歌词、GitHub 等按需缓存仍在站点，业务状态写入和实时发布统一在 Worker。
 
-```text
-上报器 ──▶ ingest Worker ──▶ Vercel 的 Redis / 自己的房间 / POST lyjw.me/api/revalidate
-                └─转发─▶ EdgeOne /api/ingest/* ──▶ 自己的 Redis / 自己的 live-push / 自己的 tag
-```
+推 main 时 CI 部署改动的 Worker；`shared/`、共用 `src/lib/`、根依赖或路径配置变化也触发 ingest 部署。
+当前架构范围为 Vercel，国内侧另行设计，不保留跨站上报传播。
 
-两边各自填对面那个源（`INGEST_PEERS`：Worker 的 `wrangler.toml` 里填 `https://lyjw131.com`，
-EdgeOne 那份保留 `https://lyjw.me`，由 Vercel 路由层交给 Worker；Vercel 的 Next 处理器不再接收上报），不在代码里写死谁转给谁。
-这一份数据到齐了，**缓存却各刷各的**：`revalidateTag` 只失效本实例那份 `'use cache'`，Vercel
-另接了一套共享存储所以在那边是全局的，EdgeOne 那份因此填 `STATUS_CACHE=false`，让
-`src/app/api/status/` 下的状态端点一律直读 Redis —— 见下面「状态是怎么接的」。转发出去的请求带
-`x-ingest-relay`，对端见到它就不再往下传 —— 两边互填对方，再传一次就成环了；三份
-以上各自填齐其余几份，一跳照样到齐。实现在 `lib/ingest-relay.ts`，站点的 `ingestRoute` 和
-Worker 的入口都挂着它，所以新加一个来源自动就带传播。
-
-代价说清楚：转发是尽力而为，对端挂了只记一行日志，不把这次上报打成 4xx（数据在本地
-已经落库了，回 4xx 只会让上报器把同一份再写一遍）。所以对端会漏掉那一次变化 ——
-Emby 那份每 10 分钟兜底整推一次，能自己追上；Mac 那几份要等下一次内容变化。
-「最近在听」不在这条路上：它没有上报方，两份生产各自去 Apple 拉、各自落自己的
-Redis（见下面那节），本来就不需要谁转给谁 —— 这也是 Vercel 那份站点**仅剩的一处写入**，
-它落库后走 Worker 的 `/publish` 推给浏览器。
-另外两边的 `receivedAt` 是各自收到的时刻，差几百毫秒，充电头曲线的采样点因此不完全
-对齐，那是各存各的历史，不影响读数。
-
-Worker 使用 R2 绑定检查对象是否存在。Emby 的 `missingImages` 和 Mac 的
-`desktopIconAvailable` 仍由共享处理器结合本侧映射生成；异步转发不等待对端回执。
-两份 Redis 的映射可能短暂不同，补齐仍依赖后续上报。
-
-上报入库与实时推送（`ingest`）、在线人数、MusicKit 令牌签发、PlayStation 状态上报各是
-一个独立的 Cloudflare Worker（四个都在 `workers/` 下）。**推 main 时 CI 部署有改动的 Worker；共享 `src/lib` 或根依赖改变时也部署 ingest**
-（见 `.github/workflows/deploy-workers.yml`；`wrangler.toml` 在库里，秘密走
-`wrangler secret` 不进 CI）。
-**推送房间一份生产一个** —— 上报传到对端之后对端也要推一次，两边连同一个房间的话每个
-浏览器会收到两份一样的事件。Vercel 那份是 `ingest` 自带的房间，EdgeOne 那份仍是它自己的
-`live-push`（`live.homepage.lyjw.top`）；其余几个没有写入方，仍然共用一组（令牌签发那个
-把三份部署的域名一起写进 `ALLOWED_ORIGINS` 即可，见「跟着一起听」）。
-**Worker 的地址一律走环境变量**，源码里不写死 —— 否则任何人 clone 这个仓库跑起来
-都会去打这边的 Worker。
-
-### Mac 上报与 Vercel 读取
+### 上报与读取架构
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.png">
-  <img alt="Mac 直连 ingest Worker，Worker 写 Redis 并推送浏览器，Vercel 读取状态" src="docs/architecture-light.png">
+  <img alt="所有上报器直连 ingest Worker，Worker 写 Redis 并推送浏览器，Vercel 读取状态" src="docs/architecture-light.png">
 </picture>
 
 本图聚焦 Mac 上报链路：Mac 的远端上报端点直接配置为
@@ -150,7 +108,10 @@ Worker 使用 R2 绑定检查对象是否存在。Emby 的 `missingImages` 和 M
 
 Redis TCP 连接按请求作用域租用：同一 Node 实例里的并发请求共用一条，最后一个请求和命令结束后主动断开。不能让 ioredis 永久单例留在 serverless 实例里——实例暂停时普通 idle timer 不会跑，旧部署和 Preview 会各留一条空闲连接。Preview 必须不配 Redis 或使用独立 `REDIS_URL`；`REDIS_PREFIX` 只隔离键，不隔离连接额度。
 
-各路数据几乎全是**推进来**的，本站没有任何按钟轮询上游的东西。推送入口共用 `/api/ingest/<来源>` 这组路径和同一个 `TELEMETRY_INGEST_SECRET`：Vercel 那份由 `workers/ingest` 接（`lyjw.me/api/ingest/*` 在路由层转交，上报器统一直连 Worker），EdgeOne 那份暂时仍由站点 `src/app/api/ingest/` 下的路由接，两边跑的是 `src/lib` 里同一个 `record*`。状态落在 `lib/redis.ts` 的 mirrorKey 里（Redis 为主、进程内存为辅，没配 `REDIS_URL` 也能跑）。七个上报侧：Mac Telemetry Hub、iPhone Telemetry Hub、Home Assistant（HomePod）、Emby 推送代理、PlayStation 上报 Worker、VPS 上的 server-reporter、NAS 上的各 agent 限额上报器（`reporters/agent-limits-reporter`）。剩下那两路没有上报方（Apple Music 的「最近在听」、GitHub 贡献日历）由站点自己拉，见下一段。PlayStation 那个 Worker 的 `wrangler.toml` 里 `SITE_URL` 已经填成 ingest Worker，合并到 main 部署之后即开始真实上报；站点侧已经接好 `/api/ingest/playstation`、`/api/status/playing`、`/api/status/playing/now` 和 `/api/status/trophies`，Worker 的代码和部署说明在 `workers/playstation-reporter/`。它的 cron 每分钟看一眼[那两个人头数](#三个上报器共用一套三档)：有人正看着就 60 秒一轮完整 tick，页面只是开着 2 分钟一轮，一个页面都没开压回 15 分钟一轮，**每轮都发 presence** —— 内容没变也发，那一封就是心跳：站点照样落库刷新 `observedAt`，但不广播、也不急失效，只推一次普通 tag 让快照跟着走。断流判定因此在 `/api/status/playing/now` 出口每次请求现算（`PLAYSTATION_STALE_MS`，默认 50 分钟 = 闲时三轮加余量），超窗发降级信封：**Worker 死了是「不知道他在不在玩」，不是「他离线了」**，所以宁可让卡片收起「正在游玩」那一行，也不伪造一个 `online: false`。奖杯目录只在解锁指纹变化时才推，没有 `/now`，也不走实时推送。前两个是**设备级的遥测中心**：一台设备一个入口、一个信封、一个 `modules` 字典。上报器只跟一个源站说话，收到的那份会把请求原样转给对端部署，见[上面那节](#两份生产之间靠传播上报对齐)。
+七个来源共用 Worker 的 `/api/ingest/<来源>` 和 `TELEMETRY_INGEST_SECRET`：
+Mac、iPhone、HomePod、Emby、PlayStation、server、agents。设备遥测采用一台设备、一个入口、
+一个信封和一个 `modules` 字典。PlayStation 上报器位于 `workers/playstation-reporter/`。
+它的 cron 每分钟看一眼[那两个人头数](#三个上报器共用一套三档)：有人正看着就 60 秒一轮完整 tick，页面只是开着 2 分钟一轮，一个页面都没开压回 15 分钟一轮，**每轮都发 presence** —— 内容没变也发，那一封就是心跳：站点照样落库刷新 `observedAt`，但不广播、也不急失效，只推一次普通 tag 让快照跟着走。断流判定因此在 `/api/status/playing/now` 出口每次请求现算（`PLAYSTATION_STALE_MS`，默认 50 分钟 = 闲时三轮加余量），超窗发降级信封：**Worker 死了是「不知道他在不在玩」，不是「他离线了」**，所以宁可让卡片收起「正在游玩」那一行，也不伪造一个 `online: false`。奖杯目录只在解锁指纹变化时才推，没有 `/now`，也不走实时推送。前两个是**设备级的遥测中心**：一台设备一个入口、一个信封、一个 `modules` 字典。
 
 首屏 HTML 与状态 API 使用独立的 `page:<主题>` / `api:<主题>` 缓存标签和条目。
 普通上报让两份都后台更新；播放、充电结构等 urgent 上报只让 API 立即失效，首屏仍先返回
@@ -158,29 +119,26 @@ Redis TCP 连接按请求作用域租用：同一 Node 实例里的并发请求�
 共享缓存函数必须显式传入 `page` 或 `api`，嵌套调用也要沿用同一 scope，避免 API 标签传播
 到整页，使下一位访客被迫等待取数、封面和歌词重建。没有缓存或超过 7 天硬过期时仍需重建。
 
-缓存回归用生产构建（`pnpm build` + `pnpm start --port 3212`）验证，开发模式不代表 ISR 行为。
-构建和启动均需使用隔离配置：`REDIS_URL`、`INGEST_PEERS`、`NEXT_PUBLIC_LIVE_PUSH_URL`、
-`LIVE_PUSH_SECRET` 置空，`STATUS_CACHE=true`，`TELEMETRY_INGEST_SECRET=local-status-cache-verification`；
-其他上游凭据及 Worker 地址同样置空，避免测试访问线上服务。然后执行
-`node scripts/verify-status-cache.mjs`。脚本只接受本机地址，检查实际构建产物没有 API 标签泄漏，
-再验证 urgent 上报后第一次 HTML 返回旧值、第一次 API 返回新值，以及后台重建最终收敛。
-测试数据只留在该测试进程的内存里。
+缓存与上报回归先运行 `pnpm build`，再运行 `node scripts/verify-ingest-worker.mjs`。
+脚本启动独立 Redis、Worker 和 Next，验证鉴权、旧路由 404、写入、缓存失效与 WebSocket；
+配置和数据全部隔离，退出时清理。单独检查页面缓存可用 `scripts/verify-status-cache.mjs`，
+通过 `--base` 和 `--ingest` 分别指定本地 Next 与 Worker，两者需连接同一隔离 Redis。
 
-站点会出网的有三处，都走 `src/lib/cache.ts`（带 TTL、in-flight 去重和 5 秒负缓存）：① 给此刻在播的曲子查一个可跳转的地址；② GitHub 贡献热力图（`lib/github-chart`，TTL 10 分钟）去 `api.github.com/graphql` 取日历；③ Apple Music 的「最近在听」列表（`lib/apple-music-recent`，TTL 2 分钟）。后两路没有上报方，只能自己拉。**核心原则：前端轮询多快，回源频率都不变**，由各自的 TTL 决定 —— 三处都是被访客的请求驱动的，没人看时一次都不出网，也没有任何定时器。值存 Redis（进程重启和多实例共享）；in-flight 去重始终在进程内，它挡的是同一进程的并发穿透，Redis 代劳不了。
+站点按需查询 Apple 目录、歌词和 GitHub 贡献日历，继续使用 TTL 缓存；
+最近在听的定时刷新、状态写入和广播由 Worker 执行。
 
 ### 推给浏览器 — 自建 Worker
 
-状态落库之后由 `lib/live-events.ts` 的 fanout 推一条事件：在 `workers/ingest` 里它直接进 Durable Object 房间广播；站点自己还会写的那一路（「最近在听」列表）往 Worker 的 `/publish` POST 一条。浏览器直连那个 Worker 收推送（`hooks/use-live-events.ts` 把收到的写进 SWR 缓存，卡片照旧用 `useStatus` 读，不用管数据是推来的还是轮询来的）。**本站不持有任何长连接** —— 从前这里是一条自建的 SSE，但在 serverless 上每条 SSE 连接都钉死一个函数调用、到 maxDuration 被掐断再重连，全程计费。
+Worker 的 `src/fanout.ts` 将带数据的事件直接广播到 Durable Object。
+浏览器直连 `/ws`，`hooks/use-live-events.ts` 将事件写入 SWR 缓存；站点不发布事件、不持有长连接。
 
-长连接挂在 Cloudflare 的 Durable Object 上，一个全站房间：
+| 方法 | Worker 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/api/ingest/<来源>` | Bearer 鉴权，接收数据、落库、广播与缓存失效 |
+| GET | `/ws` | 浏览器连接，按 `ALLOWED_ORIGINS` 检查来源 |
+| GET | `/count` | 上报器读取连接数，调整上报频率 |
 
-| 方法 | 路径                  | 谁在用                                                    |
-| ---- | --------------------- | --------------------------------------------------------- |
-| POST | `/api/ingest/<来源>`  | 上报器。`Authorization: Bearer <TELEMETRY_INGEST_SECRET>`；落库、广播、回敲站点失效 |
-| GET  | `/ws`                 | 浏览器。按 `ALLOWED_ORIGINS` 校验来源，支持后缀通配        |
-| POST | `/publish`            | 站点。`Authorization: Bearer <LIVE_PUSH_SECRET>`          |
-
-站点这侧只配一个 `NEXT_PUBLIC_LIVE_PUSH_URL`（Worker 的源）加一个 `LIVE_PUSH_SECRET`，两条路径写在代码里 —— 它们和事件名一样，本来就是站点和自己那个 Worker 之间的约定。EdgeOne 那份接的仍是它自己的 `live-push`（只有 `/ws` 和 `/publish`），同一个变量名。
+站点只需配置公开的 `NEXT_PUBLIC_LIVE_PUSH_URL`，浏览器由此拼接 `/ws`。
 
 这里从前走 Pusher 协议（云 Pusher，或自部署 [Sockudo](https://github.com/sockudo/sockudo)）。换掉的理由不是它不好用，而是这条链路上唯一还托在别人手里的一环：单条事件 10 KB 的上限就近在眼前（两张列表 4.4 KB / 2.8 KB），免费额度按连接数和消息数计，而在线人数那条已经在自己的 Worker 上跑着了（`workers/online-counter`）。两个 Worker 分开部署：那个只数人头，谁连上谁断开就是全部输入；这个要接站点的写入、要鉴权、要转发任意负载。
 
@@ -230,7 +188,7 @@ Emby 对拖动进度条不发任何通知，那部分只能查会话。查的人
 
 - **条目里存的是「图片键」而不是地址**（`imageKey`，由代理按 `itemId:kind:tag:height` 拼，图换了 ImageTag 键就换），读取时才换成地址。图片和列表是分两次推来的：列表先到、图片可能还在路上，或者 Redis 被清空后只需补图。晚到的那批图能把已经存着的列表一起点亮，不用整份重推。
 - **响应里回 `missingImages`**：站点引用了却没有的键。代理据此补传，Redis 清空、容器换机器之后不需要人工干预。
-- **上报器直传图片**：Emby 海报在代理侧用 sharp 压成 `<sha256>.webp`、Mac 图标用系统原生编码器压成 `<sha256>.png`，都由上报器直传 R2。站点只 HEAD 校验并保存对象键，公开 URL 在读取时按部署环境组装；Redis 里不存完整 URL 或任何图片二进制。HEAD 结果只缓存 5 分钟——桶被清空后站点要能重新发现对象没了，否则会一直发指向已删对象的 URL。
+- **上报器直传图片**：Emby 海报在代理侧用 sharp 压成 `<sha256>.webp`、Mac 图标用系统原生编码器压成 `<sha256>.png`，都由上报器直传 R2。Worker 只 HEAD 校验并保存对象键，公开 URL 在读取时按部署环境组装；Redis 里不存完整 URL 或任何图片二进制。HEAD 结果只缓存 5 分钟——桶被清空后 Worker 要能重新发现对象没了，否则会一直发指向已删对象的 URL。
 
 > 卡片的「在 Emby 里打开」跳转链接指向 `EMBY_PUBLIC_URL`，源站地址会出现在页面 HTML 里 —— 这是有意为之，不用改：Emby 前面有认证网关，跳过去的人会撞到认证。没配这个变量就不给链接，没有内网地址可退，退了也是个点不开的链接。
 
@@ -238,13 +196,13 @@ Apple Music 的封面没有代理，仍走 `mzstatic.com` 直链 —— 那本�
 
 ### 最近在听 — Apple Music
 
-列表由站点自己去 `/v1/me/recent/played` 拉（`lib/apple-music-recent`），拉回来存一个键、访客读那一个键。这件事在 NAS 上当过一阵常驻上报器，现在收编回来了。
+列表由 ingest Worker 请求 `/v1/me/recent/played`（`workers/ingest/src/apple-music-recent.ts`），写入 Redis 后推送浏览器并使站点缓存失效。
 
 **为什么当时要一个常驻进程。** 因为那时这份列表还兼着推断「此刻在不在听」：Apple 没有可查的当前播放接口，只能连续盯着列表里排第一的那项什么时候换人，再对照容器总时长猜它有没有播完。连续观测这件事在 serverless 上做不了——状态存在进程内存里，每个实例各有一份、活不到下一次切换。**那个推断已经撤掉了**，于是常驻的理由也没了。
 
 **为什么撤掉它。** 它只在 Mac 和 HomePod 同时没声时才可能露面（有实况就以实况为准），而那正是它最没把握的时候：一直循环同一张专辑时第一项不变，会被当成已经停了；只听了一首就走开，仍按整张时长算，能一直显示在听；停下来但没换过东西的情况根本分辨不出来。卡片上那枚 `inferred` 角标就是在说「这一句我也不确定」。**现在「在不在播」只认设备实况**，这份列表只回答「听过什么」。
 
-**于是刷新挂在访客的轮询上。** `/api/status/listening/now` 每个可见标签页 60 秒进一次函数，顺手在响应之后刷一遍列表（TTL 2 分钟，不新增任何函数调用）；没人看就一次都不拉，站点里没有任何定时器。第一个访客的首屏仍是手上那份，但他自己挂载后的第一次轮询当场就去拉，一两秒后由推送点亮——不必等一个上报器先反应过来把闲时那档提上去（从前最坏 15 分钟）。
+刷新由 ingest Worker 驱动：WebSocket 建立时检查，cron 每分钟在有存活连接时检查一次；Redis 两分钟闸门限制真正的拉取。无人连接时不拉取。新列表通过 Worker 推送和缓存失效送到页面，状态 GET 只读取已写入的数据。
 
 TTL 定在分钟级不是为了「在听」的精度（那个已经没有了），是为了 hero 那条取色带：实时播放的封面配色是拿当前专辑 ID 去这份列表里借的，刚开播的那张要等它进了列表才有颜色可借。两分钟落在一首歌之内。
 
@@ -252,13 +210,13 @@ TTL 定在分钟级不是为了「在听」的精度（那个已经没有了）�
 
 需要 **Developer Token** 和 **Music-User-Token** 两条凭据，**全部由 Mac 上报器推来**：Mac Telemetry Hub 用本机 MusicKit 现签一对，作为 `appleMusicCredentials` 模块随 `/api/ingest/mac` 的信封送上来。`.p8` 私钥留在那台机器的钥匙串里由系统保管，服务器上一份都没有，本站也不含任何 JWT 签名代码。
 
-MusicKit 签出来的 developer token 寿命约一个月（**Apple 没承诺这个数字**，实测在 29～30 天之间浮动过），上报器从它自己的 JWT 解出 `exp`，过了「上报时刻 → 到期时刻」的中点就重签重发。取相对中点而不是写死提前量，正是因为寿命不由 Apple 承诺，写死在两个方向上都可能错。实践中上报器重启比半个寿命周期频繁得多，所以多数情况是每次启动重传一份新的。站点这边只管收下最新的一份，不做提前判断——用的时候手上是哪份就用哪份，被 Apple 拒了就是这一轮作废。
+MusicKit 签出来的 developer token 寿命约一个月（**Apple 没承诺这个数字**，实测在 29～30 天之间浮动过），上报器从它自己的 JWT 解出 `exp`，过了「上报时刻 → 到期时刻」的中点就重签重发。取相对中点而不是写死提前量，正是因为寿命不由 Apple 承诺，写死在两个方向上都可能错。实践中上报器重启比半个寿命周期频繁得多，所以多数情况是每次启动重传一份新的。Worker 只管收下最新的一份，不做提前判断——用的时候手上是哪份就用哪份，被 Apple 拒了就是这一轮作废。
 
 凭据存 Redis，和 `telemetryState` 严格分开 —— 后者会经 `/api/status/*` 发到浏览器。那个 ingest 路由也不打印请求体。
 
 **没有服务端自签的回落。** 有回落就意味着私钥仍得躺在服务器上，这套东西就白做了。代价是 Mac 上报器长期离线且 Redis 也丢了凭据时「最近在听」直接失败，这是明摆着的取舍。
 
-**这份凭据也不从任何端点发出去。** 从前 `GET /api/ingest/apple-music` 把它转交给拉列表的上报器，代价是 `TELEMETRY_INGEST_SECRET` 从此和收听记录同等敏感（拿到密钥就能取走 token）；拉列表收回站点之后，那条路和那个代价一起没了。
+**这份凭据也不从任何端点发出去。** 从前 `GET /api/ingest/apple-music` 把它转交给拉列表的上报器，代价是 `TELEMETRY_INGEST_SECRET` 从此和收听记录同等敏感（拿到密钥就能取走 token）；拉列表迁入 Worker 后，那条路和那个代价一起没了。
 
 拉的是 `/v1/me/recent/played?limit=10`。注意这个端点返回的是**专辑、歌单、电台这类容器**，不是单曲：专辑给 `artistName`、歌单给 `curatorName`，没有 `durationInMillis`，`limit` 上限是 10。时长要顺着容器的 `href` 再查一次曲目加起来（缓存 24 小时），封面对自建歌单还要去资料库副本取（缓存 12 小时，那是个 24 小时到期的预签名地址）——所以稳定状态下一轮刷新只有拉列表那一次真的出网。
 
