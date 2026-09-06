@@ -46,9 +46,9 @@ export type WebPlayer = {
   /** 只打开 / 关闭弹窗，不动播放 */
   openDialog: () => void;
   closeDialog: () => void;
-  /** 未授权时弹窗里的 Sign in：加载 MusicKit 并 authorize，只登录不开播 */
+  /** 弹窗里的 Sign in：authorize；正在试听的话重装成完整曲目接着放 */
   signIn: () => void;
-  /** 队列没装时装队列开播，装了就是续播。只在已授权时有意义 */
+  /** 队列没装时装队列开播，装了就是续播。未授权时放的是 30 秒试听 */
   play: () => void;
   pause: () => void;
   toggle: () => void;
@@ -333,6 +333,14 @@ export function useWebPlayerState(): WebPlayer {
   const openDialog = useCallback(() => setOpen(true), []);
   const closeDialog = useCallback(() => setOpen(false), []);
 
+  /** 出过声就算 active：页头缩略播放器、底栏的 Stop 都看它 */
+  const markActive = useCallback((inst: MusicKitInstance) => {
+    setPlaybackState(inst.playbackState);
+    setNowPlaying(inst.nowPlayingItem ?? null);
+    setActive(true);
+    activeRef.current = true;
+  }, []);
+
   /** 弹窗里的 Sign in：加载 MusicKit 并 authorize，只登录不开播 */
   const signIn = useCallback(() => {
     void runExclusive(async () => {
@@ -348,33 +356,45 @@ export function useWebPlayerState(): WebPlayer {
         if (!inst.isAuthorized) await inst.authorize();
         setAuthorized(inst.isAuthorized);
         setStatus("idle");
+        /*
+         * 登录前已经在试听：队列里装的是 30 秒预览，授权不会把它们换成整首。
+         * 停掉、按同一张专辑重装、再从头放，这次出来的才是完整曲目。
+         */
+        const current = itemRef.current;
+        if (inst.isAuthorized && activeRef.current && current) {
+          await inst.stop().catch(() => {});
+          loadedIdRef.current = null;
+          await prepare(inst, current);
+          if (loadedIdRef.current !== current.id) return;
+          await mkSafe(() => inst.play());
+          markActive(inst);
+        }
       } catch (err) {
         setError(describe(err));
         setStatus("error");
       }
     });
-  }, [getOrReuseMusicKit, runExclusive]);
+  }, [getOrReuseMusicKit, markActive, prepare, runExclusive]);
 
   /**
    * 播放键：队列没对上（装失败过、或被别处清掉）就先装，然后出声。
-   * 只在已授权时才会被调到 —— 未授权的弹窗上没有播放键，只有 Sign in。
+   *
+   * 不看 isAuthorized：未授权的实例 MusicKit 会放每首 30 秒的试听，这是 Apple
+   * 给的行为，拦不住也没必要拦 —— 弹窗上把它标成试听、把登录入口摆在旁边即可。
    */
   const play = useCallback(() => {
     void runExclusive(async () => {
       const inst = instanceRef.current;
       const currentItem = itemRef.current;
-      if (!inst || !inst.isAuthorized || !currentItem) return;
+      if (!inst || !currentItem) return;
       if (loadedIdRef.current !== currentItem.id) {
         await prepare(inst, currentItem);
         if (loadedIdRef.current !== currentItem.id) return;
       }
       await mkSafe(() => inst.play());
-      setPlaybackState(inst.playbackState);
-      setNowPlaying(inst.nowPlayingItem ?? null);
-      setActive(true);
-      activeRef.current = true;
+      markActive(inst);
     });
-  }, [prepare, runExclusive]);
+  }, [markActive, prepare, runExclusive]);
 
   const pause = useCallback(() => {
     void runExclusive(async () => {
@@ -420,15 +440,17 @@ export function useWebPlayerState(): WebPlayer {
     [runExclusive],
   );
 
+  /** 点队列里某一首：changeToMediaAtIndex 自己会开播，所以这里也要记 active */
   const playAt = useCallback(
     (index: number) => {
       void runExclusive(async () => {
         const inst = instanceRef.current;
         if (!inst) return;
         await mkSafe(() => inst.changeToMediaAtIndex(index));
+        markActive(inst);
       });
     },
-    [runExclusive],
+    [markActive, runExclusive],
   );
 
   /** 停止并 unauthorize */

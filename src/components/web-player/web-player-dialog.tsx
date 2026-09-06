@@ -33,8 +33,9 @@ const SEEK_KEYS = new Set([
  * 播放器的展开页。
  *
  * 打开时队列已经在装（见 use-web-player 的 openWith），所以曲目列表登录前就
- * 能看；进度条和上一首 / 下一首要授权之后才有意义，登录前那块换成说明。
- * 出声只从底栏的 Play 或中间那颗播放键开始 —— 点封面进来不会自动放。
+ * 能看。登录前也能放，只是每首 30 秒试听 —— 控件一律显示，试听这件事在说明
+ * 和进度行里标出来。出声只从底栏的 Play、中间那颗播放键或点某一首开始 ——
+ * 点封面进来不会自动放。
  */
 export function WebPlayerDialog({ player }: { player: WebPlayer }) {
   const titleId = useId();
@@ -46,6 +47,8 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
   const isStarting = player.status === "starting";
   const isPlaying = player.playbackState === PLAYBACK_STATE.playing;
   const playable = item ? queueOptionsFor(item) !== null : false;
+  /** 未授权时放的是 30 秒试听，进度那一行要标出来 */
+  const previewing = !player.authorized;
 
   /**
    * 进度在这里自己订阅，不进 Provider 的状态：playbackTimeDidChange 每秒一次，
@@ -120,79 +123,82 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
           </p>
         ) : (
           <>
+            {/* 未登录也能放：MusicKit 给每首 30 秒试听。控件照常，只把这件事说清楚 */}
             {!player.authorized ? (
-              <p className="mt-3 text-sm leading-relaxed text-foreground">
-                请登录有效的 Apple Music 订阅授权。站点不转发音频、储存凭据，播放发生在你和 Apple 之间。
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                未登录只能试听每首 30 秒。登录有效的 Apple Music 订阅后完整播放；站点不转发音频、储存凭据。
               </p>
-            ) : (
-              <>
-                <div className="mt-3">
-                  <input
-                    type="range"
-                    aria-label="播放进度"
-                    min={0}
-                    max={durationMs > 0 ? durationMs : 1000}
-                    step={1000}
-                    value={Math.min(positionMs, durationMs > 0 ? durationMs : 1000)}
-                    onChange={(e) => {
-                      setIsDragging(true);
-                      setPositionMs(Number(e.target.value));
-                    }}
-                    onPointerUp={(e) => {
-                      setIsDragging(false);
-                      player.seekTo(Number((e.target as HTMLInputElement).value));
-                    }}
-                    onKeyUp={(e) => {
-                      // 只认真的在挪滑块的键：Tab 走开、Escape 关窗也会经过这里，
-                      // 那时 seek 一下等于把正在放的歌拽回滑块当前的整秒
-                      if (!SEEK_KEYS.has(e.key)) return;
-                      setIsDragging(false);
-                      player.seekTo(Number((e.target as HTMLInputElement).value));
-                    }}
-                    className="w-full cursor-pointer accent-live"
-                  />
-                  <div className="label-mono flex justify-between text-muted-foreground tabular-nums">
-                    <span>{formatClock(positionMs)}</span>
-                    <span>{formatClock(durationMs)}</span>
-                  </div>
-                </div>
+            ) : null}
 
-                <div className="mt-2 flex items-center justify-center gap-6">
-                  <button
-                    type="button"
-                    aria-label="上一首"
-                    disabled={isStarting}
-                    onClick={player.previous}
-                    className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                  >
-                    <SkipBack className="size-4" aria-hidden />
-                  </button>
-                  {/* 还没出声时 toggle 走的是 play：装好的队列从第一首开始 */}
-                  <button
-                    type="button"
-                    aria-label={isPlaying ? "暂停" : "播放"}
-                    disabled={isStarting}
-                    onClick={player.toggle}
-                    className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                  >
-                    {isPlaying ? (
-                      <Pause className="size-5" aria-hidden />
-                    ) : (
-                      <Play className="size-5" aria-hidden />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="下一首"
-                    disabled={isStarting}
-                    onClick={player.next}
-                    className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                  >
-                    <SkipForward className="size-4" aria-hidden />
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="mt-3">
+              <input
+                type="range"
+                aria-label="播放进度"
+                min={0}
+                max={durationMs > 0 ? durationMs : 1000}
+                step={1000}
+                value={Math.min(positionMs, durationMs > 0 ? durationMs : 1000)}
+                onChange={(e) => {
+                  setIsDragging(true);
+                  setPositionMs(Number(e.target.value));
+                }}
+                onPointerUp={(e) => {
+                  setIsDragging(false);
+                  player.seekTo(Number((e.target as HTMLInputElement).value));
+                }}
+                onKeyUp={(e) => {
+                  // 只认真的在挪滑块的键：Tab 走开、Escape 关窗也会经过这里，
+                  // 那时 seek 一下等于把正在放的歌拽回滑块当前的整秒
+                  if (!SEEK_KEYS.has(e.key)) return;
+                  setIsDragging(false);
+                  player.seekTo(Number((e.target as HTMLInputElement).value));
+                }}
+                className="w-full cursor-pointer accent-live"
+              />
+              <div className="label-mono flex justify-between text-muted-foreground tabular-nums">
+                <span>{formatClock(positionMs)}</span>
+                {/* 试听时总长是 0:30，前面点明，免得以为整首就这么短 */}
+                <span>
+                  {previewing ? "试听 · " : null}
+                  {formatClock(durationMs)}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-2 flex items-center justify-center gap-6">
+              <button
+                type="button"
+                aria-label="上一首"
+                disabled={isStarting}
+                onClick={player.previous}
+                className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                <SkipBack className="size-4" aria-hidden />
+              </button>
+              {/* 还没出声时 toggle 走的是 play：装好的队列从第一首开始 */}
+              <button
+                type="button"
+                aria-label={isPlaying ? "暂停" : "播放"}
+                disabled={isStarting}
+                onClick={player.toggle}
+                className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                {isPlaying ? (
+                  <Pause className="size-5" aria-hidden />
+                ) : (
+                  <Play className="size-5" aria-hidden />
+                )}
+              </button>
+              <button
+                type="button"
+                aria-label="下一首"
+                disabled={isStarting}
+                onClick={player.next}
+                className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                <SkipForward className="size-4" aria-hidden />
+              </button>
+            </div>
 
             {/* 队列登录前就显示：有缓存或已装载时，打开弹窗前就计算好高度，防止跳动 */}
             {(() => {
@@ -265,11 +271,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
       </div>
 
       <div className="mt-4 flex border-t border-line">
-        {!playable ? null : !player.authorized ? (
-          <DialogButton disabled={isStarting} onClick={player.signIn}>
-            {isStarting ? "Connecting..." : "Sign in"}
-          </DialogButton>
-        ) : player.active ? (
+        {!playable ? null : player.active ? (
           <DialogButton onClick={player.stop}>Stop</DialogButton>
         ) : (
           // 点封面只是打开这张卡片，真正出声从这里（或中间那颗播放键）开始
@@ -277,6 +279,16 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
             {isStarting ? "Loading..." : "Play"}
           </DialogButton>
         )}
+
+        {/* 登录入口和播放键并排：未登录也能试听，登录是「换成整首」而不是「才能放」 */}
+        {playable && !player.authorized ? (
+          <>
+            <div className="w-px self-stretch bg-line" aria-hidden />
+            <DialogButton disabled={isStarting} onClick={player.signIn}>
+              {isStarting ? "Connecting..." : "Sign in"}
+            </DialogButton>
+          </>
+        ) : null}
 
         {/* 跳 Apple Music 的入口在这里，列表和 hero 上不再直接外跳 */}
         {item?.link ? (
