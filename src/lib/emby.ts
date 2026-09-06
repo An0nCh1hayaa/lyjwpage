@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import {
   clearNowPlaying,
   getCurrentItem,

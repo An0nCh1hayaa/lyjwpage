@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { localDate } from "@/lib/freshness";
 import { number, object, text } from "@/lib/json";
 import { mirrorKey } from "@/lib/redis";

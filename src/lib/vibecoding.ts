@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { agentLimitsStaleMs } from "@/lib/freshness";
 import { fanout, VIBECODING_TAG } from "@/lib/live-events";
 import { mirrorKey } from "@/lib/redis";

@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { CHARGER_STALE_MS, heartbeatWindowMs } from "@/lib/freshness";
 import { getStored, lastPushReceivedAt } from "@/lib/powerbank-store";
 import {

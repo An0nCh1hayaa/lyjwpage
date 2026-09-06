@@ -6,7 +6,8 @@ import {
 } from "@/lib/apple-music";
 import { prepareRecentlyPlayed } from "@/lib/apple-music-store";
 import { cached, claim } from "@/lib/cache";
-import { afterResponse, fanout, LISTENING_TAG } from "@/lib/live-events";
+import { fanout, LISTENING_TAG } from "@/lib/live-events";
+import { afterResponse } from "@/lib/live-platform";
 import { withRedisScope } from "@/lib/redis";
 import type { ListeningItem } from "@/lib/types";
 

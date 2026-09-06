@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { mirrorKey } from "@/lib/redis";
 import type { ListeningItem, ListeningPayload } from "@/lib/types";
 

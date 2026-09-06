@@ -1,28 +1,54 @@
 import { DurableObject } from "cloudflare:workers";
 
+import { recordEmbyReport } from "@/lib/emby";
+import { recordHomePodEvent } from "@/lib/homepod-ingest";
+import { relayIngest } from "@/lib/ingest-relay";
+import { recordPhoneEnvelope } from "@/lib/phone-telemetry";
+import { recordPlaystationReport } from "@/lib/playstation";
+import { withRedisScope } from "@/lib/redis";
+import { recordServerReport } from "@/lib/server";
+import { recordTelemetryEnvelope } from "@/lib/telemetry";
+import { recordAgentLimits } from "@/lib/vibecoding";
+
+import { ROOM_ID } from "./live-platform";
+import { requestStore, type Env } from "./runtime";
+
 /**
- * 服务端 → 浏览器的实时推送。
+ * 上报入口 + 实时推送，一个 Worker。
  *
- * 站点把一条事件 POST 到 /publish，这里广播给所有连在 /ws 上的浏览器。
- * 站点自己不持有任何长连接，所以它照旧可以是 serverless 的。
+ * 上报器把信封 POST 到 `/api/ingest/<来源>`（路径和站点从前那几条一字不差，上报器只换
+ * 源），这里鉴权、落 Redis、直接在 Durable Object 房间里广播给连在 `/ws` 上的浏览器、
+ * 再回敲站点的 `/api/revalidate` 让 `'use cache'` 过期。落库和推送用的是站点 `src/lib`
+ * 里同一批 store，wrangler 的 alias 只换掉三处依赖运行平台的模块（Redis 连接、缓存失效
+ * 与推送、R2 校验），见 wrangler.toml。
  *
- * 和隔壁 online-counter 分开部署：那个只数人头，谁连上谁断开就是全部输入；
- * 这个要接站点的写入、要鉴权、要转发任意负载。两件事挤在一个 Worker 里的话，
- * 人数广播的改动会和推送的鉴权面互相牵连。
+ * 站点不再持有写路径，也不持有任何长连接。它自己还会写的只剩「最近在听」那份自拉的
+ * 列表，那一路走 `/publish`。
+ *
+ * 和隔壁 online-counter 分开部署：那个只数人头，谁连上谁断开就是全部输入；这个要接
+ * 写入、要鉴权、要转发任意负载。两件事挤在一个 Worker 里的话，人数广播的改动会和
+ * 写入的鉴权面互相牵连。
  */
 
-export interface Env {
-  LIVE_PUSH: DurableObjectNamespace<LivePushRoom>;
-  /** 发布用的共享密钥。没配则 /publish 一律拒绝 —— 见 worker.fetch 里的说明 */
-  LIVE_PUSH_SECRET?: string;
-  ALLOWED_ORIGINS?: string;
-}
+export type { Env };
 
 const WS_PATH = "/ws";
 const PUBLISH_PATH = "/publish";
+const INGEST_PREFIX = "/api/ingest/";
 
-/** 全站一个房间：浏览器不往回发东西，事件类型已经把内容分开了 */
-const ROOM_ID = "global";
+/**
+ * 来源 → 处理器。加一个来源就加一行，路径和站点 app/api/ingest/<来源>/route.ts 同名。
+ * 每个 record* 自己决定落哪些键、推哪些事件、失效哪些 tag（lib/live-events 的 fanout）。
+ */
+const HANDLERS: Record<string, (body: unknown) => Promise<unknown>> = {
+  mac: recordTelemetryEnvelope,
+  iphone: recordPhoneEnvelope,
+  homepod: recordHomePodEvent,
+  emby: recordEmbyReport,
+  playstation: recordPlaystationReport,
+  server: recordServerReport,
+  agents: recordAgentLimits,
+};
 
 const LOCAL_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 
@@ -108,7 +134,6 @@ function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
-/** 逐字节等时比较，别让 401 的返回快慢把密钥一位一位漏出去 */
 function secretMatches(provided: string, expected: string): boolean {
   const a = new TextEncoder().encode(provided);
   const b = new TextEncoder().encode(expected);
@@ -124,51 +149,95 @@ function bearerToken(request: Request): string | null {
 }
 
 function getRoom(env: Env): DurableObjectStub<LivePushRoom> {
-  return env.LIVE_PUSH.getByName(ROOM_ID);
+  return env.LIVE_PUSH.get(env.LIVE_PUSH.idFromName(ROOM_ID));
+}
+
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** 解析失败统一抛这一句，和站点 lib/api 的 parseBody 同一句 —— 上报器看到的文案不因入口而异 */
+function parseBody(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("请求体不是合法 JSON");
+  }
 }
 
 /**
- * 静默多久之后不再把一条连接算进人头。理由见 connectionCount。
+ * 一条上报：鉴权、读请求体、转给对端、落库扇出、统一响应。对应站点 lib/api 的 ingestRoute。
+ *
+ * **没配密钥一律 503，不放行。** 站点那份不配就放行是给本地开发留的；这里是公网上的
+ * 一个写入口，背后是生产 Redis，没有那种场景。
+ *
+ * 成功一律 202：数据已收下，落库、推送、缓存失效、转给对端全在响应之后跑（waitUntil），
+ * 200 会给人「全部生效」的错觉。handler 抛出来的按 400 —— 到这一步还失败的都是 payload
+ * 本身的问题，上报器重发同一份也不会变好。
  */
+async function handleIngest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  source: string,
+): Promise<Response> {
+  if (request.method !== "POST") return jsonResponse({ ok: false, error: "只接受 POST" }, { status: 405 });
+
+  const expected = env.TELEMETRY_INGEST_SECRET;
+  if (!expected) {
+    return jsonResponse({ ok: false, error: "Worker 未配置 TELEMETRY_INGEST_SECRET" }, { status: 503 });
+  }
+  const provided = bearerToken(request);
+  if (!provided || !secretMatches(provided, expected)) {
+    return jsonResponse({ ok: false, error: "未授权" }, { status: 401 });
+  }
+  if (!env.REDIS_URL) {
+    return jsonResponse({ ok: false, error: "Worker 未配置 REDIS_URL" }, { status: 503 });
+  }
+
+  const handler = Object.hasOwn(HANDLERS, source) ? HANDLERS[source] : undefined;
+  if (!handler) return jsonResponse({ ok: false, error: `没有这个上报来源：${source}` }, { status: 404 });
+
+  let raw: string;
+  try {
+    raw = await request.text();
+  } catch (error) {
+    return jsonResponse({ ok: false, error: reason(error) }, { status: 400 });
+  }
+
+  return requestStore.run({ env, ctx }, () => {
+    // 转发和落库一样不在上报器的等待里。relayIngest 自己看 x-ingest-relay 决定转不转、
+    // 看 INGEST_PEERS 决定转给谁；这里只管把它挪到响应之后。
+    ctx.waitUntil(relayIngest(request, raw));
+
+    return withRedisScope(async () => {
+      try {
+        const data = await handler(parseBody(raw));
+        return jsonResponse({ ok: true, data }, { status: 202 });
+      } catch (error) {
+        const message = reason(error);
+        console.error("[ingest]", source, message);
+        return jsonResponse({ ok: false, error: message }, { status: 400 });
+      }
+    });
+  });
+}
+
 const CONNECTION_STALE_MS = 5 * 60_000;
-/**
- * 静默多久之后把连接关掉。
- *
- * 和上面那条是两个判断，不能合成一个：不计数问的是「此刻这一份能不能收到并画
- * 出来」——冻住的页面（手机锁屏、移动端后台标签页会被浏览器整个冻结，定时器完全
- * 停掉）两样都做不到，5 分钟就不算数是对的；关不关问的是「这条还有没有主」，
- * 关错的代价是逼一个还活着的页面重连，所以线推到 30 分钟，只收真正回不来的。
- *
- * 不关也不是没有代价：连接一直挂着占着实例的连接表，而运行时对休眠实例的连接数
- * 有上限。计数那条线已经挡住了「僵尸把上报器钉在快档」这个真问题，这条只是打扫。
- */
 const CONNECTION_CLOSE_MS = 30 * 60_000;
 
+/**
+ * 全站一个房间。连接走休眠版 `ctx.acceptWebSocket()`，心跳由运行时用
+ * `setWebSocketAutoResponse` 直接回，实例可以被回收、连接照样挂着。
+ * 所以**不能把连接存在实例字段里**，连接列表一律现问 `ctx.getWebSockets()`；
+ * 自动回复也**必须登记在构造函数里**，醒来那一次没有人走接入路径。
+ */
 export class LivePushRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    /**
-     * 心跳由运行时直接回，不唤醒实例。
-     *
-     * **必须挂在构造函数里**：休眠醒来会重新 new 一遍实例，只在 accept 那条路上
-     * 登记的话，这一次就没人登记了 —— 后面的 ping 落到空的 webSocketMessage，
-     * 自动回复时间戳不再走动，而 connectionCount 正是拿那个时刻判活的，还开着的
-     * 后台页面会被一条条算成死连接，中间那档就再也进不去了。
-     *
-     * 浏览器那侧要定时发点东西，否则中间的代理会把这条空转的连接掐掉；
-     * 但要是每次心跳都把休眠的实例叫醒，休眠就白做了。
-     */
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
-  /**
-   * 用休眠版的 acceptWebSocket，不是 accept() + 自己攒一个 Set。
-   *
-   * 这些连接绝大多数时间是空转的（上报器几十秒才来一条），休眠之后实例可以被
-   * 回收、连接照样挂着，事件到了再唤醒。代价是**不能把连接存在实例字段里** ——
-   * 休眠会把内存清掉，醒来时构造函数重跑一遍，那个 Set 就空了。
-   * 连接列表一律现问 ctx.getWebSockets()。
-   */
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket upgrade", { status: 426 });
@@ -181,17 +250,11 @@ export class LivePushRoom extends DurableObject<Env> {
     const server = pair[1];
 
     this.ctx.acceptWebSocket(server);
-    /**
-     * 接入时刻。数人头时要用它兜底：刚连上还没发过第一个 ping 的那 30 秒里，
-     * 自动回复的时间戳还是 null，只看那个会把新连接算成死的。
-     * 附件跟着连接走，休眠醒来还在（实例字段不行，见上面那段）。
-     */
     server.serializeAttachment({ at: Date.now() });
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  /** 广播一条已经序列化好的事件，返回发出去的连接数 */
   broadcast(message: string): number {
     let delivered = 0;
     for (const socket of this.ctx.getWebSockets()) {
@@ -206,21 +269,13 @@ export class LivePushRoom extends DurableObject<Env> {
   }
 
   /**
-   * 此刻**开着**本站的页面数。上报器拿它调频，所以宁可少数不可多数。
+   * 数人头时跳过静默超过 5 分钟的连接：对端消失却没发过 close 帧的连接会一直挂在
+   * 列表里，一条这样的僵尸就足以把上报器永远钉在中档。判据是运行时替我们记的 ping
+   * 自动回复时刻（浏览器每 30 秒发一个），阈值取 5 分钟而不是贴着心跳画线 —— 后台
+   * 标签页的定时器会被浏览器节流到最多每分钟一响。
    *
-   * 不能直接数 `getWebSockets().length`：对端消失却没发过 close 帧的连接会一直
-   * 挂在列表里（手机进电梯、进程被杀），而一条这样的僵尸就足以把上报器永远钉在
-   * 快档上 —— online-counter 当初栽的就是这一下。改看运行时替我们记的自动回复
-   * 时刻：浏览器每 30 秒发一个 ping（use-live-events 的 HEARTBEAT_MS），静默超过
-   * 阈值的就不算数。
-   *
-   * 阈值取 5 分钟而不是 90 秒：后台标签页的 setInterval 会被浏览器节流到最多每
-   * 分钟一响，贴着心跳间隔画线会成片误杀真实的后台连接 —— 而后台标签页恰恰是这
-   * 个数存在的理由（可见的那些由 online-counter 数）。
-   *
-   * 静默 5 分钟只是不计数，不关：关错的代价是逼一个还活着的页面重连。真正回不来
-   * 的那些由 CONNECTION_CLOSE_MS 那条线收走，顺路做，不额外挂闹钟 —— 定时唤醒
-   * 实例会把休眠省下的东西抵消掉。
+   * 「不计数」和「关掉」是两条线：锁屏、移动端后台会被整个冻结，随时会解冻回来，
+   * 关掉只会逼它重连。所以关的那条线推到 30 分钟，顺路在数人头时做掉，不额外挂闹钟。
    */
   connectionCount(now = Date.now()): number {
     let alive = 0;
@@ -243,12 +298,6 @@ export class LivePushRoom extends DurableObject<Env> {
     return alive;
   }
 
-  /**
-   * 浏览器发来的消息一律不理。
-   *
-   * 这是单向广播：页面上没有任何东西需要往回说。"ping" 已经被上面的
-   * 自动回复接走了，走到这里的都是意料之外的内容。
-   */
   async webSocketMessage(): Promise<void> {}
 
   async webSocketClose(ws: WebSocket, code: number): Promise<void> {
@@ -259,8 +308,13 @@ export class LivePushRoom extends DurableObject<Env> {
 }
 
 const worker = {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname.startsWith(INGEST_PREFIX)) {
+      return handleIngest(request, env, ctx, url.pathname.slice(INGEST_PREFIX.length));
+    }
+
     // 每条返回都带上，不只是成功那条：只有 200 带 CORS 头的话，浏览器侧的调用方
     // 看到的会是一句 CORS 错误，而不是 401 / 400 这些真正说明问题的状态码
     const cors = getCorsHeaders(request, env);
@@ -284,12 +338,6 @@ const worker = {
         return jsonResponse({ ok: false, error: "只接受 POST" }, { status: 405, headers: cors });
       }
 
-      /**
-       * 没配密钥就拒绝，不是放行。
-       *
-       * 和 /ws 的来源白名单反着来是故意的：那边放开顶多是别的站点蹭一份本来就
-       * 公开的广播，这边放开等于让任何人往所有访客的页面里塞任意内容。
-       */
       const expected = env.LIVE_PUSH_SECRET;
       if (!expected) {
         return jsonResponse(
@@ -317,30 +365,17 @@ const worker = {
         return jsonResponse({ ok: false, error: "事件缺少 type" }, { status: 400, headers: cors });
       }
 
-      /**
-       * 负载不校验形状，原样转发：事件种类和字段是站点和它自己前端之间的约定，
-       * 在这里再抄一份就等于同一份契约维护两处，加一种事件得改两个仓库。
-       */
       const delivered = await getRoom(env).broadcast(JSON.stringify(event));
       return jsonResponse({ ok: true, delivered }, { headers: cors });
     }
 
-    /**
-     * 调频口。上报器（server-reporter）每轮读一次，据此决定下一轮多久：
-     * 有页面开着就别睡太死。不鉴权 —— 调用方是服务端进程，不带 Origin 头，
-     * 而这个数本来就等价于站点页脚那个公开的人头数。
-     *
-     * 字段叫 connections 不叫 online：它和 online-counter 的 `online` 是两个
-     * 概念 —— 这个数的是**开着**（含后台标签页、锁了屏的手机），那个数的是
-     * **此刻可见**。
-     */
     if (url.pathname === "/count") {
       return jsonResponse({ ok: true, connections: await getRoom(env).connectionCount() });
     }
 
     if (url.pathname === "/") {
       const online = await getRoom(env).connectionCount();
-      return jsonResponse({ ok: true, service: "live-push", connections: online });
+      return jsonResponse({ ok: true, service: "ingest", connections: online });
     }
 
     return new Response("Not found", { status: 404 });

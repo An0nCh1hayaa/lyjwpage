@@ -2,8 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 
 import { connection, NextResponse } from "next/server";
 
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { relayIngest } from "@/lib/ingest-relay";
-import { afterResponse } from "@/lib/live-events";
+import { afterResponse } from "@/lib/live-platform";
 import { withRedisScope } from "@/lib/redis";
 import type { IngestFailure, IngestResponse, StatusResponse } from "@/lib/types";
 
@@ -11,23 +12,8 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * 「这一路还没收到过数据」。
- *
- * **不是故障**：上报器还没起来、设备还没连上、快照过了 TTL —— 都会落到这里，而站点
- * 该做的就是发一个降级信封让卡片显示提示。所以它和「取数真的炸了」必须在日志里分开：
- * 前者一行就够，后者要带栈。
- *
- * 从前两者都按 `console.error` 带栈打，于是本机开发时 Next 的浮层被一条「尚未收到充电头
- * 遥测推送」长期糊着 —— 那条既不是 bug 也无从修，充电头没插而已，但它会把真正的报错
- * 淹掉，久了就没人看那个浮层了。
- */
-export class AwaitingReport extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AwaitingReport";
-  }
-}
+/** 读路径的调用方仍从这里拿；类本身在 lib/awaiting-report，理由见那边 */
+export { AwaitingReport };
 
 /**
  * 增量拉取的游标。

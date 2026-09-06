@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { isStale, playstationStaleMs } from "@/lib/freshness";
 import { number, object, text } from "@/lib/json";
 import {

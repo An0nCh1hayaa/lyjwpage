@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { mirrorKey } from "@/lib/redis";
 import type { StoredVibeCodingYear, VibeCodingYearPayload } from "@/lib/types";
 import { normalizeVibeCodingYear, withYearFreshness } from "@/lib/vibecoding-year";

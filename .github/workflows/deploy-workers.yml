@@ -13,6 +13,9 @@ on:
     branches: [main]
     paths:
       - "workers/**"
+      - "src/lib/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/deploy-workers.yml"
 
 permissions:
@@ -44,6 +47,10 @@ jobs:
             names=$(ls workers)
           else
             names=$(git diff --name-only "$before" "$GITHUB_SHA" -- workers/ | cut -d/ -f2 | sort -u)
+            # ingest 直接打包共享 store；只改主站目录也必须同步发布写侧。
+            if git diff --name-only "$before" "$GITHUB_SHA" -- src/lib/ package.json pnpm-lock.yaml | awk 'END { exit NR == 0 }'; then
+              names=$(printf '%s\ningest\n' "$names" | sort -u)
+            fi
           fi
           # 被整个删掉的 worker 也会出现在 diff 里，目录已不存在就不进矩阵——
           # 不滤的话 wrangler-action 会拿一个不存在的 workingDirectory 打红整步
@@ -64,6 +71,19 @@ jobs:
     name: deploy ${{ matrix.worker }}
     steps:
       - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        if: matrix.worker == 'ingest'
+
+      - uses: actions/setup-node@v4
+        if: matrix.worker == 'ingest'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install shared store dependencies
+        if: matrix.worker == 'ingest'
+        run: pnpm install --frozen-lockfile
 
       # 大多数 worker 没有运行时依赖；PlayStation 上报器依赖 psn-api，
       # 必须先装进 node_modules 才能让 wrangler 打包。按锁文件是否存在判断，

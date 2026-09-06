@@ -42,52 +42,71 @@ pnpm dev
 
 分不清哪个是哪个时看响应头：Vercel 是 `server: Vercel`，EdgeOne 是 `Server: edgeone-pages`。
 
-### 两份生产之间靠传播上报对齐
+### Vercel 那份只读：写路径在 Worker 上
 
-上报器只跟其中一个源站说话，而两份生产各有各的 Redis、各有各的 live-push Worker、
-各有各的 Next 缓存。所以**收到上报的那份除了自己落库，还会把同一个请求原样转给
-对面**：对面进的是同一条路由、同一个 handler，于是它写自己的 Redis、推自己的 Worker、
-刷自己的 tag —— 三件事都在它自己那边发生，没有谁远程指挥谁。
+Vercel 那份站点**不再接上报**。上报、写 Redis、推给浏览器这条路整个搬到了
+`workers/ingest`（前身是只管推送的 `live-push`）：上报器把信封 POST 到它的
+`/api/ingest/<来源>`（路径和站点从前那几条一字不差，上报器只换源），它鉴权、写
+Vercel 那份 Redis、直接在自己的 Durable Object 房间里广播、再回敲站点的
+`POST /api/revalidate` 让 `'use cache'` 过期。落库和推送跑的是站点 `src/lib` 里**同一批
+store**，wrangler 打包时只用 `alias` 换掉 Redis 连接、缓存失效与推送、R2 校验三个依赖
+运行平台的模块 —— 见那边的 README。
 
 ```text
-上报器 ──▶ EdgeOne ──▶ 自己的 Redis / 自己的 Worker / 自己的 tag
-              └─转发─▶ Vercel ──▶ 自己的 Redis / 自己的 Worker / 自己的 tag
+上报器 ──▶ ingest Worker ──▶ Vercel 的 Redis / 自己的房间 / POST lyjw.me/api/revalidate
+                └─转发─▶ EdgeOne /api/ingest/* ──▶ 自己的 Redis / 自己的 live-push / 自己的 tag
 ```
 
-两边各自填对面那个源（`INGEST_PEERS`），不在代码里写死谁转给谁。这一份数据到齐了，
-**缓存却各刷各的**：`revalidateTag` 只失效本实例那份 `'use cache'`，Vercel 另接了一套
-共享存储所以在那边是全局的，EdgeOne 那份因此填 `STATUS_CACHE=false`，让 `src/app/api/status/`
-下的状态端点一律直读 Redis —— 见下面「状态是怎么接的」。转发出去的请求带
-`x-ingest-relay`，对端见到它就不再往下传 —— 两边互填对方，再传一次就成环了；三份
-以上各自填齐其余几份，一跳照样到齐。实现在 `lib/ingest-relay.ts`，挂在
-`lib/api.ts` 的 `ingestRoute` 上，所以新加一个 `/api/ingest/*` 自动就带传播。
+`/api/revalidate` 只传 tag 名单（普通 + urgent，语义和 `lib/live-events` 的 fanout 一致），
+不传数据 —— 数据早在 Redis 里了，下一次读自己会去拿。它是整条写路径上唯一一次回到站点的
+HTTP，只接受 `lib/live-events` 里 `STATUS_TAGS` 名单内的 tag，鉴权沿用
+`TELEMETRY_INGEST_SECRET`，没配密钥一律 503。从前也有过一个只传缓存失效的端点，删掉的
+理由是那时数据本身还靠两边共用一个 Redis 才对得上；现在数据由 Worker 外部写入，tag
+通知是唯一剩下的跨边界事件，理由成立了。
 
-从前传播的是「缓存失效」这一件事：一个 `/api/ingest/revalidate` 端点，收到上报的那份
-把 tag 名单发给对面（`revalidateTag` 只打得到本进程）。那条路只管缓存，数据本身仍然
-靠两边共用一个 Redis 才对得上 —— 于是国内那份的每一次读写都要跨一次海，而缓存还要
-单独再传播一遍。改成传播上报之后，缓存失效变成对端处理这次上报的自然结果，那个端点
-和它那套 tag 名单校验就一起删掉了。
+### 两份生产之间靠传播上报对齐
+
+上报器只跟其中一个源说话，而两份生产各有各的 Redis、各有各的推送房间、各有各的 Next
+缓存。所以**收到上报的那份除了自己落库，还会把同一个请求原样转给对面**：对面进的是同一
+条路径、同一个 handler，于是它写自己的 Redis、推自己的房间、刷自己的 tag —— 三件事都在它
+自己那边发生，没有谁远程指挥谁。国内那份（EdgeOne）**目前仍跑站点自己的 `/api/ingest/*`**，
+直连它的上报器不用动；原来发往 `lyjw.me` 的转发由 Vercel 外部 rewrite 交给 Worker，
+Worker 收到的上报反过来转给它。
+
+```text
+上报器 ──▶ EdgeOne /api/ingest/* ──▶ 自己的 Redis / 自己的 live-push / 自己的 tag
+                └─转发─▶ ingest Worker ──▶ Vercel 的 Redis / 自己的房间 / POST lyjw.me/api/revalidate
+```
+
+两边各自填对面那个源（`INGEST_PEERS`：Worker 的 `wrangler.toml` 里填 `https://lyjw131.com`，
+EdgeOne 那份保留 `https://lyjw.me`，由 Vercel 路由层交给 Worker；Vercel 的 Next 处理器不再接收上报），不在代码里写死谁转给谁。
+这一份数据到齐了，**缓存却各刷各的**：`revalidateTag` 只失效本实例那份 `'use cache'`，Vercel
+另接了一套共享存储所以在那边是全局的，EdgeOne 那份因此填 `STATUS_CACHE=false`，让
+`src/app/api/status/` 下的状态端点一律直读 Redis —— 见下面「状态是怎么接的」。转发出去的请求带
+`x-ingest-relay`，对端见到它就不再往下传 —— 两边互填对方，再传一次就成环了；三份
+以上各自填齐其余几份，一跳照样到齐。实现在 `lib/ingest-relay.ts`，站点的 `ingestRoute` 和
+Worker 的入口都挂着它，所以新加一个来源自动就带传播。
 
 代价说清楚：转发是尽力而为，对端挂了只记一行日志，不把这次上报打成 4xx（数据在本地
 已经落库了，回 4xx 只会让上报器把同一份再写一遍）。所以对端会漏掉那一次变化 ——
 Emby 那份每 10 分钟兜底整推一次，能自己追上；Mac 那几份要等下一次内容变化。
 「最近在听」不在这条路上：它没有上报方，两份生产各自去 Apple 拉、各自落自己的
-Redis（见下面那节），本来就不需要谁转给谁。
+Redis（见下面那节），本来就不需要谁转给谁 —— 这也是 Vercel 那份站点**仅剩的一处写入**，
+它落库后走 Worker 的 `/publish` 推给浏览器。
 另外两边的 `receivedAt` 是各自收到的时刻，差几百毫秒，充电头曲线的采样点因此不完全
 对齐，那是各存各的历史，不影响读数。
 
-还有一类字段是**各部署各算**的，回执要并起来再回给上报器：Emby 的 `missingImages`
-和 Mac 的 `desktopIconAvailable` 问的都是「你那边有没有这份图」，两边的 Redis 不是同一个，
-答案可能不一样。上报器只跟一个源站说话，只要有一份说没有就得让它补传，否则那张图在
-对端永远缺着（见 `mergeEmbyReceipt` / `mergeTelemetryReceipt`）。
+Worker 使用 R2 绑定检查对象是否存在。Emby 的 `missingImages` 和 Mac 的
+`desktopIconAvailable` 仍由共享处理器结合本侧映射生成；异步转发不等待对端回执。
+两份 Redis 的映射可能短暂不同，补齐仍依赖后续上报。
 
-实时推送、在线人数、MusicKit 令牌签发、PlayStation 状态上报各是
-一个独立的 Cloudflare Worker（四个都在 `workers/` 下）。**推 main 时 CI 只把有改动的
-那几个自动 `wrangler deploy`**
+上报入库与实时推送（`ingest`）、在线人数、MusicKit 令牌签发、PlayStation 状态上报各是
+一个独立的 Cloudflare Worker（四个都在 `workers/` 下）。**推 main 时 CI 部署有改动的 Worker；共享 `src/lib` 或根依赖改变时也部署 ingest**
 （见 `.github/workflows/deploy-workers.yml`；`wrangler.toml` 在库里，秘密走
 `wrangler secret` 不进 CI）。
-**live-push 一份生产一个** —— 上报传到对端之后对端也要推一次，两边填同一个 Worker
-的话每个浏览器会收到两份一样的事件；其余几个没有写入方，仍然共用一组（令牌签发那个
+**推送房间一份生产一个** —— 上报传到对端之后对端也要推一次，两边连同一个房间的话每个
+浏览器会收到两份一样的事件。Vercel 那份是 `ingest` 自带的房间，EdgeOne 那份仍是它自己的
+`live-push`（`live.homepage.lyjw.top`）；其余几个没有写入方，仍然共用一组（令牌签发那个
 把三份部署的域名一起写进 `ALLOWED_ORIGINS` 即可，见「跟着一起听」）。
 **Worker 的地址一律走环境变量**，源码里不写死 —— 否则任何人 clone 这个仓库跑起来
 都会去打这边的 Worker。
@@ -113,7 +132,7 @@ Redis（见下面那节），本来就不需要谁转给谁。
 
 Redis TCP 连接按请求作用域租用：同一 Node 实例里的并发请求共用一条，最后一个请求和命令结束后主动断开。不能让 ioredis 永久单例留在 serverless 实例里——实例暂停时普通 idle timer 不会跑，旧部署和 Preview 会各留一条空闲连接。Preview 必须不配 Redis 或使用独立 `REDIS_URL`；`REDIS_PREFIX` 只隔离键，不隔离连接额度。
 
-各路数据几乎全是**推进来**的，本站没有任何按钟轮询上游的东西。推送入口共用 `/api/ingest/*` 和同一个 `TELEMETRY_INGEST_SECRET`，状态落在 `lib/redis.ts` 的 mirrorKey 里（Redis 为主、进程内存为辅，没配 `REDIS_URL` 也能跑）。七个上报侧：Mac Telemetry Hub、iPhone Telemetry Hub、Home Assistant（HomePod）、Emby 推送代理、PlayStation 上报 Worker、VPS 上的 server-reporter、NAS 上的各 agent 限额上报器（`reporters/agent-limits-reporter`）。剩下那两路没有上报方（Apple Music 的「最近在听」、GitHub 贡献日历）由站点自己拉，见下一段。PlayStation 那个 Worker 的 `wrangler.toml` 里 `SITE_URL` 已经填成主站，合并到 main 部署之后即开始真实上报；站点侧已经接好 `/api/ingest/playstation`、`/api/status/playing`、`/api/status/playing/now` 和 `/api/status/trophies`，Worker 的代码和部署说明在 `workers/playstation-reporter/`。它的 cron 每分钟看一眼[那两个人头数](#三个上报器共用一套三档)：有人正看着就 60 秒一轮完整 tick，页面只是开着 2 分钟一轮，一个页面都没开压回 15 分钟一轮，**每轮都发 presence** —— 内容没变也发，那一封就是心跳：站点照样落库刷新 `observedAt`，但不广播、也不急失效，只推一次普通 tag 让快照跟着走。断流判定因此在 `/api/status/playing/now` 出口每次请求现算（`PLAYSTATION_STALE_MS`，默认 50 分钟 = 闲时三轮加余量），超窗发降级信封：**Worker 死了是「不知道他在不在玩」，不是「他离线了」**，所以宁可让卡片收起「正在游玩」那一行，也不伪造一个 `online: false`。奖杯目录只在解锁指纹变化时才推，没有 `/now`，也不走实时推送。前两个是**设备级的遥测中心**：一台设备一个入口、一个信封、一个 `modules` 字典。上报器只跟一个源站说话，收到的那份会把请求原样转给对端部署，见[上面那节](#两份生产之间靠传播上报对齐)。
+各路数据几乎全是**推进来**的，本站没有任何按钟轮询上游的东西。推送入口共用 `/api/ingest/<来源>` 这组路径和同一个 `TELEMETRY_INGEST_SECRET`：Vercel 那份由 `workers/ingest` 接（`lyjw.me/api/ingest/*` 在路由层转交，上报器也可直连 Worker），EdgeOne 那份暂时仍由站点 `src/app/api/ingest/` 下的路由接，两边跑的是 `src/lib` 里同一个 `record*`。状态落在 `lib/redis.ts` 的 mirrorKey 里（Redis 为主、进程内存为辅，没配 `REDIS_URL` 也能跑）。七个上报侧：Mac Telemetry Hub、iPhone Telemetry Hub、Home Assistant（HomePod）、Emby 推送代理、PlayStation 上报 Worker、VPS 上的 server-reporter、NAS 上的各 agent 限额上报器（`reporters/agent-limits-reporter`）。剩下那两路没有上报方（Apple Music 的「最近在听」、GitHub 贡献日历）由站点自己拉，见下一段。PlayStation 那个 Worker 的 `wrangler.toml` 里 `SITE_URL` 已经填成主站，合并到 main 部署之后即开始真实上报；站点侧已经接好 `/api/ingest/playstation`、`/api/status/playing`、`/api/status/playing/now` 和 `/api/status/trophies`，Worker 的代码和部署说明在 `workers/playstation-reporter/`。它的 cron 每分钟看一眼[那两个人头数](#三个上报器共用一套三档)：有人正看着就 60 秒一轮完整 tick，页面只是开着 2 分钟一轮，一个页面都没开压回 15 分钟一轮，**每轮都发 presence** —— 内容没变也发，那一封就是心跳：站点照样落库刷新 `observedAt`，但不广播、也不急失效，只推一次普通 tag 让快照跟着走。断流判定因此在 `/api/status/playing/now` 出口每次请求现算（`PLAYSTATION_STALE_MS`，默认 50 分钟 = 闲时三轮加余量），超窗发降级信封：**Worker 死了是「不知道他在不在玩」，不是「他离线了」**，所以宁可让卡片收起「正在游玩」那一行，也不伪造一个 `online: false`。奖杯目录只在解锁指纹变化时才推，没有 `/now`，也不走实时推送。前两个是**设备级的遥测中心**：一台设备一个入口、一个信封、一个 `modules` 字典。上报器只跟一个源站说话，收到的那份会把请求原样转给对端部署，见[上面那节](#两份生产之间靠传播上报对齐)。
 
 首屏 HTML 与状态 API 使用独立的 `page:<主题>` / `api:<主题>` 缓存标签和条目。
 普通上报让两份都后台更新；播放、充电结构等 urgent 上报只让 API 立即失效，首屏仍先返回
@@ -133,16 +152,17 @@ Redis TCP 连接按请求作用域租用：同一 Node 实例里的并发请求�
 
 ### 推给浏览器 — 自建 Worker
 
-状态落库之后，`lib/live-events.ts` 往 `workers/live-push` POST 一条事件；浏览器直连那个 Worker 收推送（`hooks/use-live-events.ts` 把收到的写进 SWR 缓存，卡片照旧用 `useStatus` 读，不用管数据是推来的还是轮询来的）。**本站不持有任何长连接** —— 从前这里是一条自建的 SSE，但在 serverless 上每条 SSE 连接都钉死一个函数调用、到 maxDuration 被掐断再重连，全程计费。
+状态落库之后由 `lib/live-events.ts` 的 fanout 推一条事件：在 `workers/ingest` 里它直接进 Durable Object 房间广播；站点自己还会写的那一路（「最近在听」列表）往 Worker 的 `/publish` POST 一条。浏览器直连那个 Worker 收推送（`hooks/use-live-events.ts` 把收到的写进 SWR 缓存，卡片照旧用 `useStatus` 读，不用管数据是推来的还是轮询来的）。**本站不持有任何长连接** —— 从前这里是一条自建的 SSE，但在 serverless 上每条 SSE 连接都钉死一个函数调用、到 maxDuration 被掐断再重连，全程计费。
 
 长连接挂在 Cloudflare 的 Durable Object 上，一个全站房间：
 
-| 方法 | 路径       | 谁在用                                                    |
-| ---- | ---------- | --------------------------------------------------------- |
-| GET  | `/ws`      | 浏览器。按 `ALLOWED_ORIGINS` 校验来源，支持后缀通配        |
-| POST | `/publish` | 站点。`Authorization: Bearer <LIVE_PUSH_SECRET>`          |
+| 方法 | 路径                  | 谁在用                                                    |
+| ---- | --------------------- | --------------------------------------------------------- |
+| POST | `/api/ingest/<来源>`  | 上报器。`Authorization: Bearer <TELEMETRY_INGEST_SECRET>`；落库、广播、回敲站点失效 |
+| GET  | `/ws`                 | 浏览器。按 `ALLOWED_ORIGINS` 校验来源，支持后缀通配        |
+| POST | `/publish`            | 站点。`Authorization: Bearer <LIVE_PUSH_SECRET>`          |
 
-站点这侧只配一个 `NEXT_PUBLIC_LIVE_PUSH_URL`（Worker 的源）加一个 `LIVE_PUSH_SECRET`，两条路径写在代码里 —— 它们和事件名一样，本来就是站点和自己那个 Worker 之间的约定。
+站点这侧只配一个 `NEXT_PUBLIC_LIVE_PUSH_URL`（Worker 的源）加一个 `LIVE_PUSH_SECRET`，两条路径写在代码里 —— 它们和事件名一样，本来就是站点和自己那个 Worker 之间的约定。EdgeOne 那份接的仍是它自己的 `live-push`（只有 `/ws` 和 `/publish`），同一个变量名。
 
 这里从前走 Pusher 协议（云 Pusher，或自部署 [Sockudo](https://github.com/sockudo/sockudo)）。换掉的理由不是它不好用，而是这条链路上唯一还托在别人手里的一环：单条事件 10 KB 的上限就近在眼前（两张列表 4.4 KB / 2.8 KB），免费额度按连接数和消息数计，而在线人数那条已经在自己的 Worker 上跑着了（`workers/online-counter`）。两个 Worker 分开部署：那个只数人头，谁连上谁断开就是全部输入；这个要接站点的写入、要鉴权、要转发任意负载。
 

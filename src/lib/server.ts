@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { isStale, serverStaleMs } from "@/lib/freshness";
 import { fanout, SERVER_TAG } from "@/lib/live-events";
 import { mirrorKey } from "@/lib/redis";

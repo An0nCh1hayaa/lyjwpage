@@ -1,4 +1,4 @@
-import { AwaitingReport } from "@/lib/api";
+import { AwaitingReport } from "@/lib/awaiting-report";
 import { number, object, text } from "@/lib/json";
 import {
   getPlaystationPlayedGames,

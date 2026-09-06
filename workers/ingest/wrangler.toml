@@ -1,0 +1,58 @@
+name = "ingest"
+main = "src/index.ts"
+compatibility_date = "2025-02-14"
+# nodejs_compat：AsyncLocalStorage、node:crypto。populate_process_env：把下面的 vars 和
+# wrangler secret 填进 process.env —— 站点 src/lib 里的 store 都是从 process.env 读配置的，
+# 打进 Worker 之后不改它们一行
+compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
+workers_dev = true
+
+routes = [
+  { pattern = "ingest.homepage.lyjw.llc", custom_domain = true },
+  # 现有浏览器与上报器的 /count 仍可用；两个域名进入同一房间。
+  { pattern = "live.homepage.lyjw.llc", custom_domain = true }
+]
+
+[vars]
+# 和 online-counter / musickit-token 那两份是同一个名单，
+# 加域名时三个 worker 都要改、都要重新部署。
+ALLOWED_ORIGINS = "https://lyjw131.com,https://lyjw.me,https://dev.lyjw.me,https://*.vercel.app"
+# 下面这几项要和 Vercel 那份站点的同名环境变量一致：写进 Redis 的键前缀、事件里
+# 拼出来的图片和 Emby 地址，读的那侧（站点）拿的是同一套。
+REDIS_PREFIX = "lyjwpage"
+R2_PUBLIC_BASE_URL = "https://r2.homepage.lyjw.llc"
+EMBY_PUBLIC_URL = "https://emby.lyjw131.com"
+# 处理完一次上报后回敲这份站点的 /api/revalidate
+SITE_URL = "https://lyjw.me"
+# 对端部署：原样转一份过去（带 x-ingest-relay，单跳），对端写自己的 Redis、推自己的 Worker。
+# 国内那份接进来之前它仍然走站点自己的 /api/ingest/*。
+INGEST_PEERS = "https://lyjw131.com"
+
+# 站点 src/lib 里依赖运行平台的三个模块，在这里换成 Worker 版；导出名两边一致。
+# 其余 @/lib/* 由 tsconfig 的 paths 直接解析到 ../../src/lib。
+[alias]
+"@/lib/redis-driver" = "./src/redis-driver.ts"
+"@/lib/live-platform" = "./src/live-platform.ts"
+"@/lib/r2-assets" = "./src/r2-assets.ts"
+
+[[durable_objects.bindings]]
+name = "LIVE_PUSH"
+class_name = "LivePushRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LivePushRoom"]
+
+# 上报器直传图片的那个桶。这里只 HEAD，回执告诉上报器哪些图还没到
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "lyjw-homepage"
+
+[observability]
+enabled = true
+
+# 秘密不写在这里，用 `wrangler secret put <名字>` 存进去：
+#   REDIS_URL               Vercel 那份站点读的同一个 Redis
+#   TELEMETRY_INGEST_SECRET 上报器 / 对端转发的 Bearer，也是回敲站点 /api/revalidate 的凭据
+#   LIVE_PUSH_SECRET        站点 POST /publish 的 Bearer（「最近在听」列表那一路）
+# 没配前两项，上报入口一律 503；没配第三项，/publish 一律 503。

@@ -1,7 +1,7 @@
 import { workerUrl } from "@/lib/worker-url";
 
 /**
- * 实时推送服务（workers/live-push）的地址。
+ * 实时推送服务（workers/ingest）的地址。
  *
  * 单独一个模块，是因为两侧要读的是同一份 —— 服务端把事件 POST 到 `/publish`，
  * 浏览器连 `/ws` 收。这个模块零依赖，两侧都能引。
