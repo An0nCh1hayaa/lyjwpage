@@ -121,8 +121,8 @@ export default async function Home() {
                 listeningFallback={listening}
                 nowListeningFallback={nowListening}
                 lyricsFallback={
-                  lyrics && lyrics.lines.length
-                    ? { lines: lyrics.lines, songwriters: lyrics.songwriters }
+                  nowSongId && lyrics && lyrics.lines.length
+                    ? { songId: nowSongId, lines: lyrics.lines, songwriters: lyrics.songwriters }
                     : null
                 }
                 artworkPlaceholders={artwork}

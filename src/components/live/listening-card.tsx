@@ -20,7 +20,7 @@ import { HeroMotionArtwork } from "@/components/live/hero-motion-artwork";
 import { ListenAlongButton } from "@/components/live/listen-along-button";
 import { useListenAlong } from "@/hooks/use-listen-along";
 import { useLiveEvents } from "@/hooks/use-live-events";
-import { useLyrics, type CachedLyricsData } from "@/hooks/use-lyrics";
+import { useLyrics, type LyricsFallback } from "@/hooks/use-lyrics";
 import { useMotionArtwork } from "@/hooks/use-motion-artwork";
 import { useMountedAt } from "@/hooks/use-mounted-at";
 import { useExpiryRefetch, useStatus } from "@/hooks/use-status";
@@ -903,7 +903,7 @@ export function ListeningCard({
   /**
    * 首屏当前曲目的同步歌词数据，由服务端在直读 Redis 缓存后冻进首屏 HTML。
    */
-  lyricsFallback?: CachedLyricsData | null;
+  lyricsFallback?: LyricsFallback | null;
   /**
    * 首屏那批封面的低清占位（模板 URL → data URI），见 lib/artwork-placeholder。
    * 只喂给 `next/image` 的 `placeholder`，`src` 仍是 Apple CDN 直连；挂载后

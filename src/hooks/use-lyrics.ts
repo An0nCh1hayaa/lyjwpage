@@ -35,6 +35,9 @@ export type CachedLyricsData = {
   songwriters?: string[];
 };
 
+/** 首屏快照可能落后于实时状态，必须携带歌词所属曲目。 */
+export type LyricsFallback = CachedLyricsData & { songId: string };
+
 /** 有词的一首歌不会变，整个页面生命周期内只问一次 */
 const lyricsCache = new Map<string, CachedLyricsData>();
 /** 问过但没有（或接口失败）的，记到什么时候为止 */
@@ -119,21 +122,22 @@ export type UseLyricsResult = {
 export function useLyrics(
   songId: string | null,
   hasLyrics: boolean,
-  initialData?: CachedLyricsData | null,
+  initialData?: LyricsFallback | null,
 ): UseLyricsResult {
   const key = songId && hasLyrics ? songId : null;
+  const initialSongData = key && initialData?.songId === key ? initialData : null;
 
   // 首屏若带了当前曲目的歌词数据，直接预热进模块级内存缓存，避免首屏触发额外网络请求
-  if (key && initialData && initialData.lines.length && !lyricsCache.has(key)) {
-    lyricsCache.set(key, initialData);
+  if (key && initialSongData?.lines.length && !lyricsCache.has(key)) {
+    lyricsCache.set(key, initialSongData);
   }
 
   const [resolved, setResolved] = useState<{
     songId: string;
     data: CachedLyricsData | null;
   } | null>(() => {
-    if (!key || !initialData || !initialData.lines.length) return null;
-    return { songId: key, data: initialData };
+    if (!key || !initialSongData?.lines.length) return null;
+    return { songId: key, data: initialSongData };
   });
 
   /**
