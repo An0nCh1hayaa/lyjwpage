@@ -5,10 +5,9 @@ compatibility_date = "2025-02-14"
 compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 workers_dev = true
 
+# 只有这一个域名：站点的两条 WebSocket、上报器的上报和 /count 都从它拼路径。
 routes = [
-  { pattern = "ingest.homepage.lyjw.llc", custom_domain = true },
-  # 现有浏览器与上报器的 /count 仍可用；两个域名进入同一房间。
-  { pattern = "live.homepage.lyjw.llc", custom_domain = true }
+  { pattern = "ingest.homepage.lyjw.llc", custom_domain = true }
 ]
 
 [vars]
