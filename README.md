@@ -520,9 +520,10 @@ payload 带一个 `expiresInMs`，由浏览器把下一次取数排在到期那�
 时长 —— Home Assistant 按状态变化推送，曲目放完到下一条推送之间必然超时，拿它当
 作废依据会让播放中的曲目凭空消失。
 
-推送的是**两台 HA**，实体和目标地址各不相同，但契约完全一样：家里那台在 home-ha-host
-上（`media_player.homepod_home`），宿舍那台在 dorm-ha-host 上（`media_player.homepod_dorm`）。
-两处不会同时在线，指向同一个站点端点，互不冲突。
+推送来自两台 Home Assistant：`ssh dsm` 上的 `media_player.wo_shi`，以及
+`ssh n100` 上的 `media_player.zhu_wo_lyjw`。两台都直连
+`https://ingest.homepage.lyjw.llc/api/ingest/homepod`，使用相同契约。
+当前核验与回滚记录见 [上报端点核验](docs/reporter-endpoints.md)。
 
 `rest_command.push_homepod_now_playing` 的形状（`<E>` 换成对应实体）：
 
