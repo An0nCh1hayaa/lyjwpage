@@ -32,7 +32,7 @@ pnpm dev
 
 ## 部署在哪
 
-同一个仓库三份部署，各有各的 Redis：
+同一个仓库三份部署。两份生产与 ingest Worker 共用 Redis 和键前缀；预览环境独立：
 
 | 域名 | 平台 | 环境 | 说明 |
 | --- | --- | --- | --- |
@@ -42,14 +42,14 @@ pnpm dev
 
 分不清哪个是哪个时看响应头：Vercel 是 `server: Vercel`，EdgeOne 是 `Server: edgeone-pages`。
 
-### Vercel 读取，Worker 接收上报
+### 双站读取，Worker 接收上报
 
 所有上报器直连 `https://ingest.homepage.lyjw.llc/api/ingest/<来源>`。
 `workers/ingest/src/stores/` 负责解析、写 Redis；`fanout.ts` 负责广播和通知缓存失效。
 站点仅提供页面、状态读取和 `POST /api/revalidate`，没有上报路由、rewrite、中继或事件发布入口。
 
 ```text
-上报器 ──▶ ingest Worker ──▶ Redis ◀── Vercel ──▶ 浏览器
+上报器 ──▶ ingest Worker ──▶ 共享 Redis ◀── Vercel / EdgeOne ──▶ 浏览器
                  ├── WebSocket ─────────────────▶ 浏览器
                  └── POST /api/revalidate ───────▶ Vercel
 ```
@@ -67,21 +67,27 @@ cron 每分钟在有存活连接时检查，Redis 闸门限制为至少两分钟
 读取侧的目录、歌词、GitHub 等按需缓存仍在站点，业务状态写入和实时发布统一在 Worker。
 
 推 main 时 CI 部署改动的 Worker；`shared/`、共用 `src/lib/`、根依赖或路径配置变化也触发 ingest 部署。
-当前架构范围为 Vercel，国内侧另行设计，不保留跨站上报传播。
+两份生产直接读取同一份状态，不做跨站上报传播。EdgeOne 的 `STATUS_CACHE=false`，
+状态 API 每次直读 Redis；Vercel 保留 tag 缓存，由 Worker 回敲失效。
+两站的 `NEXT_PUBLIC_LIVE_PUSH_URL` 都是 `https://ingest.homepage.lyjw.llc`，
+浏览器由它拼出 `/ws` 和 `/online/ws`，不再配置独立在线人数服务。
 
 ### 上报与读取架构
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.png">
-  <img alt="所有上报器直连 ingest Worker，Worker 写 Redis 并推送浏览器，Vercel 读取状态" src="docs/architecture-light.png">
+  <img alt="七类上报来源、两个 Home Assistant 实例汇入 ingest Worker，两份站点读取共享 Redis，浏览器接收实时推送" src="docs/architecture-light.png">
 </picture>
 
-本图聚焦 Mac 上报链路：Mac 的远端上报端点直接配置为
-`https://ingest.homepage.lyjw.llc/api/ingest/mac`。Worker 写 Redis、通过 `/ws` 推送浏览器，
-并调用 Vercel 的 `/api/revalidate`；Vercel 从 Redis 读取状态，提供首屏和状态 API。
-图片仍由 Mac 直传 R2。交互版是自包含的一页
+本图列出 Mac、iPhone、Home Assistant（DSM / N100 两个实例）、Emby、Agent 限额、
+日本服务器和 PlayStation 上报器。路径为统一上报契约，运行实例的核验记录见
+[`docs/reporter-endpoints.md`](docs/reporter-endpoints.md)；手机设置仍由用户自行维护。
+Worker 写 Redis、通过 `/ws` 广播，通过 `/online/ws` 统计可见页面，
+并调用 Vercel 的 `/api/revalidate`；Vercel 与 EdgeOne 提供首屏和状态 API。
+Mac 与 Emby 上报器直传 R2；国内图片仍通过 COS 异步回源读取，未缓存对象的 GET
+会重定向到 R2，不能用 HEAD 的 404 判定浏览器加载失败。交互版是自包含的一页
 [`docs/architecture.html`](docs/architecture.html)（GitHub 不渲染 HTML，克隆下来用浏览器打开），
-节点上标着对应的源码位置，可按上报写入、页面读取、实时更新分别查看。
+节点上标着对应的源码位置，可按全部上报器、国内与国际站、图片链路分别查看。
 图由 `docs/architecture.json` 生成，改了拓扑两边一起改。
 
 ### 上报入口清单
@@ -104,7 +110,7 @@ cron 每分钟在有存活连接时检查，Redis 闸门限制为至少两分钟
 
 所有凭据只存在于服务端，浏览器只看得到 `/api/status/*` 返回的规范化数据。这些路由共用 `src/lib/api.ts` 的信封：上游挂掉时返回 `{ ok: false, error }` 而不是 5xx，让某一路数据源离线不至于把整页 SWR 打成错误态。
 
-`src/app/api/status/` 下每一条状态 GET 的快照都走 Next `'use cache'`（`lib/status-cache`），上报按 tag 失效，轮询命中时不再每次打 Redis——**除非那份部署把 `STATUS_CACHE` 填成 `false`，那时它们一律直读 Redis**（没有例外，加新端点时不用另行登记）。这个开关是给 EdgeOne 那份准备的：`revalidateTag` 只失效**本实例**那份缓存（Next 默认是每个进程各自的内存 LRU，Vercel 另接了一套共享存储所以在那边看起来是全局的），而 EdgeOne 跑的是原样的 Next（腾讯云 SCF，多实例），上报进来了 GET 也不翻新，只能等 10 分钟兜底——2026-08-16 两边并排量过（当时 revalidate 还是 60 秒），落后 12~45 秒。国内那份的 Redis 就在同一朵云上，多打几次不心疼。开关只管状态端点，首屏那份得冻着才能预渲染，所以关掉之后第一帧仍可能旧到 10 分钟，挂载后 SWR 一拉就是最新的。光给两份部署各配一个共享的 `cacheHandlers` 对不齐首屏：Next 给预渲染页发的是按 `STATUS_LIFE` 算出的 ISR 头（2026-09-06 从 lyjw131.com 实测 `s-maxage=600, stale-while-revalidate=604200, durable`），Vercel 改写成 `max-age=0` 自己管，EdgeOne 原样在边缘存 10 分钟，`revalidateTag` 打不到那一份；要对齐还得在上报扇出里清 EdgeOne 缓存，目前接受这 10 分钟（并排实测两边首屏都只旧 2～3 分钟）。状态端点的 CDN 故意 `Cache-Control: no-store`：最终响应里有存活、`?since=` 切片、`expiresInMs` 这类现算字段，不能冻在边缘。函数每次进；心跳那种不触发 tag 的戳记在 overlay 里现读一把小 key。充电头历史与 GitHub 热力图的游标、奖杯目录的 `?titleids=`（展开哪块瓷砖就只发那 1–2 款，整份目录未来是几百 KB）也都是缓存命中后在内存里切全量，不按参数分键——分了就是每个游标、每块瓷砖各占一份完整快照。
+`src/app/api/status/` 下每一条状态 GET 的快照都走 Next `'use cache'`（`lib/status-cache`），上报按 tag 失效，轮询命中时不再每次打 Redis——**除非那份部署把 `STATUS_CACHE` 填成 `false`，那时它们一律直读 Redis**（没有例外，加新端点时不用另行登记）。这个开关是给 EdgeOne 那份准备的：`revalidateTag` 只失效**本实例**那份缓存（Next 默认是每个进程各自的内存 LRU，Vercel 另接了一套共享存储所以在那边看起来是全局的），而 EdgeOne 跑的是原样的 Next（腾讯云 SCF，多实例），上报进来了 GET 也不翻新，只能等 10 分钟兜底——2026-08-16 两边并排量过（当时 revalidate 还是 60 秒），落后 12~45 秒。两站现在读取同一个 Redis，国内这份仍关闭状态缓存以避免多实例滞后。开关只管状态端点，首屏那份得冻着才能预渲染，所以关掉之后第一帧仍可能旧到 10 分钟，挂载后 SWR 一拉就是最新的。光给两份部署各配一个共享的 `cacheHandlers` 对不齐首屏：Next 给预渲染页发的是按 `STATUS_LIFE` 算出的 ISR 头（2026-09-06 从 lyjw131.com 实测 `s-maxage=600, stale-while-revalidate=604200, durable`），Vercel 改写成 `max-age=0` 自己管，EdgeOne 原样在边缘存 10 分钟，`revalidateTag` 打不到那一份；要对齐还得在上报扇出里清 EdgeOne 缓存，目前接受这 10 分钟（并排实测两边首屏都只旧 2～3 分钟）。状态端点的 CDN 故意 `Cache-Control: no-store`：最终响应里有存活、`?since=` 切片、`expiresInMs` 这类现算字段，不能冻在边缘。函数每次进；心跳那种不触发 tag 的戳记在 overlay 里现读一把小 key。充电头历史与 GitHub 热力图的游标、奖杯目录的 `?titleids=`（展开哪块瓷砖就只发那 1–2 款，整份目录未来是几百 KB）也都是缓存命中后在内存里切全量，不按参数分键——分了就是每个游标、每块瓷砖各占一份完整快照。
 
 Redis TCP 连接按请求作用域租用：同一 Node 实例里的并发请求共用一条，最后一个请求和命令结束后主动断开。不能让 ioredis 永久单例留在 serverless 实例里——实例暂停时普通 idle timer 不会跑，旧部署和 Preview 会各留一条空闲连接。Preview 必须不配 Redis 或使用独立 `REDIS_URL`；`REDIS_PREFIX` 只隔离键，不隔离连接额度。
 

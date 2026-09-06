@@ -102,10 +102,19 @@ try {
   assert.equal((await post(worker, '/publish', { type: 'presence', payload: null })).status, 404);
   assert.equal((await post(worker, '/api/ingest/homepod', {}, 'wrong')).status, 401);
   assert.equal((await post(worker, '/api/ingest/constructor', {})).status, 404);
-  assert.equal((await post(worker, '/api/ingest/mac', {})).status, 400);
+  const invalidEnvelope = await post(worker, '/api/ingest/mac', {});
+  assert.equal(invalidEnvelope.status, 400);
+  assert.deepEqual(await invalidEnvelope.json(), { ok: false, error: '上报数据无效或处理失败' });
+  const invalidJson = await fetch(`${worker}/api/ingest/mac`, {
+    method: 'POST', headers: { authorization: `Bearer ${secret}` },
+    body: '{"private-marker":',
+  });
+  assert.equal(invalidJson.status, 400);
+  assert.deepEqual(await invalidJson.json(), { ok: false, error: '上报数据无效或处理失败' });
+  assert.equal(invalidJson.headers.get('cache-control'), 'no-store');
   assert.equal((await post(site, '/api/revalidate', { tags: ['server'] }, 'wrong')).status, 401);
   assert.equal((await post(site, '/api/revalidate', { tags: ['not-a-status'] })).status, 400);
-  console.log('PASS: Worker auth, source lookup, payload validation; revalidate auth and tag allowlist');
+  console.log('PASS: Worker auth, source lookup, payload validation without internal error disclosure; revalidate auth and tag allowlist');
   async function nowPlaying() {
     return (await (await fetch(`${site}/api/status/listening/now`)).json()).data?.music?.title;
   }

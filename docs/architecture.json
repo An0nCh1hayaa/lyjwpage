@@ -2,230 +2,471 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "上报写入与 Vercel 读取",
+    "title": "主页全量上报与双站读取架构",
     "locale": "zh-CN",
-    "output": "docs/architecture.html",
     "quality_profile": "showcase",
     "viewBox": [
       1390,
-      820
+      890
     ],
     "views": [
       {
-        "id": "write",
-        "label": "上报写入",
+        "id": "reporting",
+        "label": "全部上报器",
         "focus": [
-          "reporters",
-          "worker",
-          "redis"
+          "mac_hub",
+          "iphone_hub",
+          "home_assistant",
+          "emby_proxy",
+          "agent_limits",
+          "server_reporter",
+          "psn_reporter",
+          "ingest"
         ],
-        "note": "七个来源统一直连 Worker；解析与状态写入仅在 Worker。"
+        "note": "七个数据来源、八个运行实例，统一直连 ingest Worker。"
       },
       {
-        "id": "read",
-        "label": "页面读取",
+        "id": "sites",
+        "label": "国内与国际站",
         "focus": [
-          "redis",
-          "site",
-          "web"
+          "ingest",
+          "shared_redis",
+          "sites",
+          "visitors"
         ],
-        "note": "Vercel 从 Redis 读取状态，生成首屏并提供 /api/status/*。"
+        "note": "两站读取同一个 Redis；Vercel 按 tag 失效，EdgeOne 状态 API 直读。"
       },
       {
-        "id": "live",
-        "label": "实时更新",
+        "id": "assets",
+        "label": "图片链路",
         "focus": [
-          "worker",
-          "site",
-          "web"
+          "mac_hub",
+          "emby_proxy",
+          "images",
+          "visitors"
         ],
-        "note": "Worker 广播完整数据；写完 Redis 后通知 Vercel 缓存失效。"
+        "note": "Mac 和 Emby 上报器将图片直接上传 R2，浏览器直接取图。"
       }
-    ]
+    ],
+    "repository": {
+      "url": "https://github.com/LYJW131/lyjwpage",
+      "revision": "c21ba21e8c0864e56a16d956e0362781aee2bc3b"
+    }
   },
   "components": [
     {
-      "id": "reporters",
+      "id": "mac_hub",
       "type": "external",
-      "label": "全部上报器",
-      "sublabel": "设备遥测 · NAS · PlayStation",
-      "tag": "七个来源 · 统一入口",
+      "label": "Mac Telemetry Hub",
+      "sublabel": "MacBook Pro · 本机遥测与图片",
+      "tag": "/api/ingest/mac",
       "pos": [
-        60,
-        105
+        32.4,
+        40
       ],
       "size": [
-        240,
-        100
+        305.8,
+        86
+      ],
+      "sources": [
+        {
+          "path": "docs/reporter-endpoints.md"
+        }
       ]
     },
     {
-      "id": "worker",
+      "id": "iphone_hub",
+      "type": "external",
+      "label": "iPhone Telemetry Hub",
+      "sublabel": "iPhone 17 Pro · 活动圆环",
+      "tag": "/api/ingest/iphone",
+      "pos": [
+        32.4,
+        143
+      ],
+      "size": [
+        305.8,
+        86
+      ],
+      "sources": [
+        {
+          "path": "reporters/iphone-telemetry-hub/README.md"
+        }
+      ]
+    },
+    {
+      "id": "home_assistant",
+      "type": "external",
+      "label": "Home Assistant",
+      "sublabel": "DSM 卧室 · N100 主卧",
+      "tag": "/api/ingest/homepod",
+      "pos": [
+        32.4,
+        246
+      ],
+      "size": [
+        305.8,
+        86
+      ],
+      "sources": [
+        {
+          "path": "docs/reporter-endpoints.md"
+        }
+      ]
+    },
+    {
+      "id": "emby_proxy",
+      "type": "external",
+      "label": "Emby 上报器",
+      "sublabel": "DSM · homepage-reporter",
+      "tag": "/api/ingest/emby",
+      "pos": [
+        32.4,
+        349
+      ],
+      "size": [
+        305.8,
+        86
+      ],
+      "sources": [
+        {
+          "path": "reporters/emby-reporter/README.md"
+        }
+      ]
+    },
+    {
+      "id": "agent_limits",
+      "type": "external",
+      "label": "Agent 限额上报器",
+      "sublabel": "DSM · agent-limits-reporter",
+      "tag": "/api/ingest/agents",
+      "pos": [
+        32.4,
+        452
+      ],
+      "size": [
+        305.8,
+        86
+      ],
+      "sources": [
+        {
+          "path": "reporters/agent-limits-reporter/README.md"
+        }
+      ]
+    },
+    {
+      "id": "server_reporter",
+      "type": "external",
+      "label": "服务器上报器",
+      "sublabel": "MISAKA-JP · server-reporter.service",
+      "tag": "/api/ingest/server",
+      "pos": [
+        32.4,
+        555
+      ],
+      "size": [
+        305.8,
+        86
+      ],
+      "sources": [
+        {
+          "path": "reporters/server-reporter/README.md"
+        }
+      ]
+    },
+    {
+      "id": "psn_reporter",
+      "type": "external",
+      "label": "PlayStation 上报器",
+      "sublabel": "Cloudflare · playstation-reporter",
+      "tag": "/api/ingest/playstation",
+      "pos": [
+        32.4,
+        658
+      ],
+      "size": [
+        305.8,
+        86
+      ],
+      "sources": [
+        {
+          "path": "workers/playstation-reporter/README.md"
+        }
+      ]
+    },
+    {
+      "id": "ingest",
       "type": "messagebus",
       "label": "ingest Worker",
-      "sublabel": "接收上报 · 刷新最近在听",
-      "tag": "接收 · 写入 · 推送",
+      "sublabel": "ingest.homepage.lyjw.llc",
+      "tag": "接收 · 写入 · 广播 · 在线人数",
       "pos": [
-        520,
-        105
+        556.0,
+        306
       ],
       "size": [
-        290,
-        100
+        291.9,
+        126
+      ],
+      "sources": [
+        {
+          "path": "workers/ingest/src/index.ts"
+        },
+        {
+          "path": "workers/ingest/wrangler.toml"
+        }
       ]
     },
     {
-      "id": "redis",
+      "id": "shared_redis",
       "type": "database",
-      "label": "Redis",
-      "sublabel": "遥测状态与历史",
-      "tag": "Worker 写入",
+      "label": "共享 Redis",
+      "sublabel": "遥测状态 · 历史 · 媒体凭据",
+      "tag": "Worker 写入 · 两站读取",
       "pos": [
-        1030,
-        105
+        1047.1,
+        100
       ],
       "size": [
-        250,
+        278.0,
         100
+      ],
+      "sources": [
+        {
+          "path": "src/lib/redis.ts"
+        }
       ]
     },
     {
-      "id": "site",
+      "id": "sites",
       "type": "backend",
-      "label": "Vercel · lyjw.me",
-      "sublabel": "Next.js 首屏与状态 API",
-      "tag": "读取状态 · 缓存失效",
+      "label": "Next.js 双站",
+      "sublabel": "Vercel lyjw.me / EdgeOne lyjw131.com",
+      "tag": "首屏与状态 API · 国内禁用状态缓存",
       "pos": [
-        1030,
-        595
+        1047.1,
+        405
       ],
       "size": [
-        250,
-        100
+        305.8,
+        112
+      ],
+      "sources": [
+        {
+          "path": "src/app/page.tsx"
+        },
+        {
+          "path": "src/lib/status-cache.ts"
+        }
       ]
     },
     {
-      "id": "web",
+      "id": "visitors",
       "type": "frontend",
       "label": "浏览器",
       "sublabel": "首屏 · SWR · WebSocket",
-      "tag": "读取与实时更新",
+      "tag": "歌词 / 一起听 / 实时状态",
       "pos": [
-        520,
-        595
+        1047.1,
+        735
       ],
       "size": [
-        290,
+        278.0,
         100
+      ],
+      "sources": [
+        {
+          "path": "src/lib/live-socket.ts"
+        },
+        {
+          "path": "src/hooks/use-online-count.ts"
+        }
       ]
     },
     {
-      "id": "apple",
-      "type": "external",
-      "label": "Apple Music API",
-      "sublabel": "最近播放列表",
-      "tag": "有连接时 · 两分钟节流",
+      "id": "images",
+      "type": "cloud",
+      "label": "R2 图片",
+      "sublabel": "Mac 与 Emby 上报器直接上传",
+      "tag": "内容地址 · 浏览器直读",
       "pos": [
-        60,
-        595
+        556.0,
+        735
       ],
       "size": [
-        240,
+        291.9,
         100
+      ],
+      "sources": [
+        {
+          "path": "src/lib/r2-assets.ts"
+        }
       ]
     }
   ],
   "connections": [
     {
-      "id": "post",
-      "from": "reporters",
-      "to": "worker",
-      "label": "POST /api/ingest/*",
-      "variant": "emphasis"
+      "id": "post_mac",
+      "from": "mac_hub",
+      "to": "ingest",
+      "label": "POST",
+      "variant": "emphasis",
+      "labelAt": [
+        387.3,
+        83
+      ]
     },
     {
-      "id": "write",
-      "from": "worker",
-      "to": "redis",
+      "id": "post_iphone",
+      "from": "iphone_hub",
+      "to": "ingest",
+      "label": "POST",
+      "variant": "emphasis",
+      "labelAt": [
+        387.3,
+        186
+      ]
+    },
+    {
+      "id": "post_homepod",
+      "from": "home_assistant",
+      "to": "ingest",
+      "label": "POST",
+      "variant": "emphasis",
+      "labelAt": [
+        387.3,
+        289
+      ]
+    },
+    {
+      "id": "post_emby",
+      "from": "emby_proxy",
+      "to": "ingest",
+      "label": "POST",
+      "variant": "emphasis",
+      "labelAt": [
+        387.3,
+        392
+      ]
+    },
+    {
+      "id": "post_agents",
+      "from": "agent_limits",
+      "to": "ingest",
+      "label": "POST",
+      "variant": "emphasis",
+      "labelAt": [
+        387.3,
+        495
+      ]
+    },
+    {
+      "id": "post_server",
+      "from": "server_reporter",
+      "to": "ingest",
+      "label": "POST",
+      "variant": "emphasis",
+      "labelAt": [
+        387.3,
+        598
+      ]
+    },
+    {
+      "id": "post_playstation",
+      "from": "psn_reporter",
+      "to": "ingest",
+      "label": "POST",
+      "variant": "emphasis",
+      "labelAt": [
+        387.3,
+        701
+      ]
+    },
+    {
+      "id": "store",
+      "from": "ingest",
+      "to": "shared_redis",
       "label": "写入状态",
       "variant": "emphasis"
     },
     {
       "id": "read",
-      "from": "site",
-      "to": "redis",
-      "label": "读取状态",
-      "variant": "default"
+      "from": "sites",
+      "to": "shared_redis",
+      "label": "读取同一份状态",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "revalidate",
+      "from": "ingest",
+      "to": "sites",
+      "label": "/api/revalidate · Vercel",
+      "variant": "dashed",
+      "labelAt": [
+        878.5,
+        480
+      ]
     },
     {
       "id": "page",
-      "from": "site",
-      "to": "web",
-      "label": "SSR + /api/status/*",
-      "variant": "default",
+      "from": "sites",
+      "to": "visitors",
+      "label": "首屏 + /api/status/*",
       "fromSide": "bottom",
-      "toSide": "bottom",
-      "via": [
-        [
-          1155,
-          740
-        ],
-        [
-          665,
-          740
-        ]
-      ],
-      "labelAt": [
-        920,
-        765
-      ]
+      "toSide": "top"
     },
     {
       "id": "push",
-      "from": "worker",
-      "to": "web",
-      "label": "WebSocket /ws",
-      "variant": "emphasis",
+      "from": "ingest",
+      "to": "visitors",
+      "label": "/ws + /online/ws",
+      "variant": "emphasis"
+    },
+    {
+      "id": "head",
+      "from": "ingest",
+      "to": "images",
+      "label": "HEAD 确认对象",
       "labelAt": [
-        665,
-        400
+        701.9,
+        600
       ]
     },
     {
-      "id": "invalidate",
-      "from": "worker",
-      "to": "site",
-      "label": "POST /api/revalidate",
-      "variant": "dashed"
-    },
-    {
-      "id": "recent",
-      "from": "worker",
-      "to": "apple",
-      "label": "拉取最近播放",
-      "variant": "default"
+      "id": "image_read",
+      "from": "images",
+      "to": "visitors",
+      "label": "图片直读",
+      "labelAt": [
+        935.9,
+        835
+      ]
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "七个上报来源",
+      "title": "一个 ingest 服务",
       "items": [
-        "Mac、iPhone、HomePod、Emby、PlayStation、server、agents。"
+        "/ws 推送事件；/online/ws 统计可见页面；/count 返回两类人数。",
+        "Agent、server、PlayStation 按在线人数调频；最近在听由 cron 刷新。"
       ]
     },
     {
       "dot": "emerald",
-      "title": "清晰的职责",
+      "title": "两站共享状态",
       "items": [
-        "Worker 写入和推送；Vercel 提供页面、状态读取和缓存失效。"
+        "Vercel：lyjw.me；EdgeOne：lyjw131.com。",
+        "仅 Worker 接收上报；站点无 ingest 路由和中继。"
       ]
     },
     {
       "dot": "violet",
-      "title": "实例与图片",
+      "title": "来源与辅助服务",
       "items": [
-        "iPhone 地址待用户修改；图片由上报器直传 R2，浏览器直读。"
+        "HomePod：DSM 的 wo_shi、N100 的 zhu_wo_lyjw。",
+        "musickit-token Worker 为一起听签发 token；目录、歌词由站点按需读取。"
       ]
     }
   ]

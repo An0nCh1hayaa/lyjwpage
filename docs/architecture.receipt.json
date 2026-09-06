@@ -1,12 +1,12 @@
 {
   "type": "architecture",
   "specification": {
-    "sha256": "410ea33381c262ca2b3415386ee660d132222dc46467dfa9b5cc5e5b94f2af0e",
-    "bytes": 4585
+    "sha256": "4007c3a3a4dba1bf289864dad7f129ea3dcbc452968c029cb9f1aa6c70e42ccd",
+    "bytes": 9689
   },
   "artifact": {
-    "sha256": "a29214890ceda62f9ec80940b71202b83f6f02d89c5f70f7c6b146d157349e62",
-    "bytes": 703514
+    "sha256": "75c616808909fd62f4d461c1ecbd95f0866cd79d7aad3363f2cc1e3e941c547e",
+    "bytes": 721689
   },
   "validation": {
     "checksPassed": 9,
@@ -18,24 +18,24 @@
   },
   "output": "architecture.html",
   "visual_review": "skipped (HTML browser access blocked by URL policy)",
-  "correction_rounds": 2,
-  "viewports": [],
   "static_diagram_review": "passed: light and dark SVG rasterizations inspected",
+  "viewports": [],
   "previews": {
     "architecture-light.png": {
       "kind": "svg-rasterization",
-      "sha256": "1996b20d6abeaca19b5d253de5ad375803381b5b6e94dce241f6273323962b7a",
-      "bytes": 247053
+      "sha256": "39a5537afb755a093e4ea0af17e09989105cbf5f49ec971df88c2761b2cd66a0",
+      "bytes": 344008
     },
     "architecture-dark.png": {
       "kind": "svg-rasterization",
-      "sha256": "7acbf81accc15d5ef8472822cbfb488f957dddb7b5f4d226c7400175aeed91de",
-      "bytes": 247312
+      "sha256": "4f03eeb1c78ac37a23bef4df5e6ade1b17256872810717722ba7e63a9a47a979",
+      "bytes": 344118
     }
   },
   "evidence": {
-    "scope": "verified working tree",
-    "gitRevision": null,
-    "reason": "Generated from the verified working tree; new files are not pinned to an older commit."
+    "verified": true,
+    "repository": "https://github.com/LYJW131/lyjwpage",
+    "revision": "c21ba21e8c0864e56a16d956e0362781aee2bc3b",
+    "references": 15
   }
 }

@@ -207,7 +207,8 @@ async function handleIngest(
   try {
     raw = await request.text();
   } catch (error) {
-    return jsonResponse({ ok: false, error: reason(error) }, { status: 400 });
+    console.error("[ingest] 读取请求体失败", source, reason(error));
+    return jsonResponse({ ok: false, error: "无法读取上报数据" }, { status: 400 });
   }
 
   return requestStore.run({ env, ctx }, () => {
@@ -216,9 +217,10 @@ async function handleIngest(
         const data = await handler(parseBody(raw));
         return jsonResponse({ ok: true, data }, { status: 202 });
       } catch (error) {
-        const message = reason(error);
-        console.error("[ingest]", source, message);
-        return jsonResponse({ ok: false, error: message }, { status: 400 });
+        // 处理器也会调用 Redis / R2；异常消息可能带内部地址、路径和调用细节。
+        // 只在服务端记录原因，公开响应不拼接任何异常内容。
+        console.error("[ingest]", source, reason(error));
+        return jsonResponse({ ok: false, error: "上报数据无效或处理失败" }, { status: 400 });
       }
     });
   });
