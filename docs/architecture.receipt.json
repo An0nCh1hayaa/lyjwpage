@@ -1,12 +1,12 @@
 {
   "type": "architecture",
   "specification": {
-    "sha256": "4007c3a3a4dba1bf289864dad7f129ea3dcbc452968c029cb9f1aa6c70e42ccd",
-    "bytes": 9689
+    "sha256": "5cb931eb730f09cab5fe20f9973c33c68b4471b09ea9f72171ea6b1afb1919a2",
+    "bytes": 9406
   },
   "artifact": {
-    "sha256": "75c616808909fd62f4d461c1ecbd95f0866cd79d7aad3363f2cc1e3e941c547e",
-    "bytes": 721689
+    "sha256": "215f3ba721a38fea42ba28601c18c76e1524d3dee4110097b0ae7d660c54d4e3",
+    "bytes": 721101
   },
   "validation": {
     "checksPassed": 9,
@@ -16,26 +16,135 @@
     "errors": 0,
     "warnings": 0
   },
-  "output": "architecture.html",
-  "visual_review": "skipped (HTML browser access blocked by URL policy)",
-  "static_diagram_review": "passed: light and dark SVG rasterizations inspected",
-  "viewports": [],
-  "previews": {
-    "architecture-light.png": {
-      "kind": "svg-rasterization",
-      "sha256": "39a5537afb755a093e4ea0af17e09989105cbf5f49ec971df88c2761b2cd66a0",
-      "bytes": 344008
-    },
-    "architecture-dark.png": {
-      "kind": "svg-rasterization",
-      "sha256": "4f03eeb1c78ac37a23bef4df5e6ade1b17256872810717722ba7e63a9a47a979",
-      "bytes": 344118
-    }
-  },
   "evidence": {
     "verified": true,
     "repository": "https://github.com/LYJW131/lyjwpage",
-    "revision": "c21ba21e8c0864e56a16d956e0362781aee2bc3b",
+    "revision": "f323611d70dedccaae1a6c8aa4d9d3d76b285a81",
     "references": 15
+  },
+  "output": "architecture.html",
+  "visual_review": "passed",
+  "static_diagram_review": "passed: light and dark SVG rasterizations inspected",
+  "viewports": [
+    {
+      "width": 1440,
+      "height": 900,
+      "theme": "light",
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "scrollWidth": 1440,
+      "scrollHeight": 900,
+      "overflowX": false,
+      "overflowY": false,
+      "ok": true,
+      "readerWidth": 960,
+      "diagramWidth": 930,
+      "viewBoxWidth": 1390,
+      "minimumProjectedNodeTextPx": 6.0215827338129495,
+      "minimumProjectedNodeText": "MacBook Pro · 本机遥测与图片",
+      "minimumProjectedNodeTextDetail": "context",
+      "minimumRequiredNodeTextPx": 6,
+      "readabilityOk": true,
+      "hasLegend": true,
+      "hasNavigationDock": true,
+      "legendDockIntersectionArea": 0,
+      "viewerChromeReserve": 0,
+      "viewerChromeActive": false,
+      "viewerChromeOk": true,
+      "resolvedTheme": "light"
+    },
+    {
+      "width": 1600,
+      "height": 1000,
+      "theme": "light",
+      "innerWidth": 1600,
+      "innerHeight": 1000,
+      "scrollWidth": 1600,
+      "scrollHeight": 1000,
+      "overflowX": false,
+      "overflowY": false,
+      "ok": true,
+      "readerWidth": 1055,
+      "diagramWidth": 1025,
+      "viewBoxWidth": 1390,
+      "minimumProjectedNodeTextPx": 6.636690647482014,
+      "minimumProjectedNodeText": "MacBook Pro · 本机遥测与图片",
+      "minimumProjectedNodeTextDetail": "context",
+      "minimumRequiredNodeTextPx": 6,
+      "readabilityOk": true,
+      "hasLegend": true,
+      "hasNavigationDock": true,
+      "legendDockIntersectionArea": 0,
+      "viewerChromeReserve": 0,
+      "viewerChromeActive": false,
+      "viewerChromeOk": true,
+      "resolvedTheme": "light"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "light",
+      "innerWidth": 1920,
+      "innerHeight": 1080,
+      "scrollWidth": 1920,
+      "scrollHeight": 1080,
+      "overflowX": false,
+      "overflowY": false,
+      "ok": true,
+      "readerWidth": 1180,
+      "diagramWidth": 1150,
+      "viewBoxWidth": 1390,
+      "minimumProjectedNodeTextPx": 7.446043165467626,
+      "minimumProjectedNodeText": "MacBook Pro · 本机遥测与图片",
+      "minimumProjectedNodeTextDetail": "context",
+      "minimumRequiredNodeTextPx": 6,
+      "readabilityOk": true,
+      "hasLegend": true,
+      "hasNavigationDock": true,
+      "legendDockIntersectionArea": 0,
+      "viewerChromeReserve": 0,
+      "viewerChromeActive": false,
+      "viewerChromeOk": true,
+      "resolvedTheme": "light"
+    },
+    {
+      "width": 2048,
+      "height": 1320,
+      "theme": "light",
+      "innerWidth": 2048,
+      "innerHeight": 1320,
+      "scrollWidth": 2048,
+      "scrollHeight": 1320,
+      "overflowX": false,
+      "overflowY": false,
+      "ok": true,
+      "readerWidth": 1493,
+      "diagramWidth": 1443,
+      "viewBoxWidth": 1390,
+      "minimumProjectedNodeTextPx": 9,
+      "minimumProjectedNodeText": "MacBook Pro · 本机遥测与图片",
+      "minimumProjectedNodeTextDetail": "context",
+      "minimumRequiredNodeTextPx": 6,
+      "readabilityOk": true,
+      "hasLegend": true,
+      "hasNavigationDock": true,
+      "legendDockIntersectionArea": 0,
+      "viewerChromeReserve": 0,
+      "viewerChromeActive": false,
+      "viewerChromeOk": true,
+      "resolvedTheme": "light"
+    }
+  ],
+  "previews": {
+    "architecture-light.png": {
+      "kind": "svg-rasterization",
+      "sha256": "9dbeeec1864e9ea65bed3ee9b1e0b01784a48b54747bbb80a386aa30838d4d6e",
+      "bytes": 337394
+    },
+    "architecture-dark.png": {
+      "kind": "svg-rasterization",
+      "sha256": "b51a2980e853d9d65fb8085a714a63675edb7eebd904433372152ddda20a4762",
+      "bytes": 337371
+    }
   }
 }

@@ -445,5 +445,28 @@
         405
       ]
     }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "一个 API 服务",
+      "items": [
+        "WebSocket 推送事件与统计人数。 上报器按在线人数调频。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "站点与状态后端",
+      "items": [
+        "Vercel 生成首屏；浏览器直连 Worker。 StateHub 持久化；写后通知首屏重建。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "来源与辅助服务",
+      "items": [
+        "HomePod：DSM 卧室与 N100 主卧。 独立 Worker 签发 MusicKit token。"
+      ]
+    }
   ]
 }
