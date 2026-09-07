@@ -296,8 +296,7 @@ titleId，屏蔽的游戏不上报、不占窗口；改这份名单会重推奖�
 
 门读的人头数也来自这同一个源（路径由这边拼 `/count`，和站点侧 `NEXT_PUBLIC_LIVE_PUSH_URL`
 同一个形状）。只配 `SITE_INGEST_URL` 不配 `SITE_URL` 时人头数读不到，上报不停摆，只是
-一路退到 15 分钟一轮的基线节奏。API Worker 一份生产一个，这是 Vercel 那一份 ——
-国内那份生产上开着的页面因此不进判断，少数了只会更慢。
+一路退到 15 分钟一轮的基线节奏。所有连接该 API Worker 的页面均计入人数。
 
 本目录是独立 npm 部署单元，保留自己的 `package-lock.json`。重生成时必须在没有
 `node_modules` 的干净状态运行 `npm install --package-lock-only`，否则根工作区的 pnpm

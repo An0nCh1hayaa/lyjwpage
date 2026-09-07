@@ -1,7 +1,7 @@
 # API 中枢
 
 所有上报器直连此 Worker。它负责鉴权、解析、写 SQLite、广播 WebSocket 和通知 Vercel 缓存失效。
-站点没有上报路由、rewrite、中继和事件发布逻辑。当前只覆盖 Vercel，国内侧另行设计。
+站点没有上报路由、rewrite、中继和事件发布逻辑。站点部署在 Vercel，腾讯云 EdgeOne 已退役。
 
 ## 代码职责
 

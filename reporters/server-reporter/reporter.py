@@ -93,9 +93,7 @@ def count_url() -> str:
     NEXT_PUBLIC_LIVE_PUSH_URL、另外两个上报器同一个形状。只配了 SITE_INGEST_URL
     没配 SITE_URL 就读不到，两个数恒为 0。
 
-    API Worker 是**一份生产一个**，这里填的是 Vercel 那一份，所以国内那份生产上
-    开着的后台页面数不进这个判断。少数了只会让节奏往慢里退，和读不到时同一个
-    方向，不会误提速。
+    所有连接该 API Worker 的页面都计入人数；读取失败时按零人数降频。
     """
     origin = os.environ.get("SITE_URL", "").strip()
     return f"{trim_slash(origin)}/count" if origin else ""

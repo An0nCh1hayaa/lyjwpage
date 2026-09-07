@@ -29,7 +29,7 @@ Worker 的三个 SQLite Durable Object 命名空间通过 transfer migration 迁
 | OnlineCounterRoom | `1aa4f5ed35f14a258005da8583342661` |
 | StateHub | `08a6c22e048d4a9b915ba869ad40ffee` |
 
-本次部署范围仍为海外 Vercel / Workers；国内 EdgeOne 不在验收范围。
+生产使用 Vercel / Workers；腾讯云 EdgeOne 部署已退役。
 
 ## 配置备份
 

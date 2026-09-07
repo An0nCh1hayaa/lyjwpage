@@ -29,7 +29,7 @@ Vercel 参照根 `.env.example`，仅公开后端源、缓存通知鉴权和图�
 2. `node scripts/verify-api-worker.mjs` 启动隔离 SQLite 和模拟缓存通知服务器，验证鉴权、CORS、直接查询、WebSocket、心跳无失效、并发合并及重启持久化。
 3. `NEXT_PUBLIC_BACKEND_URL=<测试 Worker 源> pnpm build`；在小号仓库和小号 Vercel 验证静态首页、缓存后台刷新以及浏览器网络路径。
 4. 测试 Worker 用 `wrangler.test.toml`，独立对象命名空间，无生产域名或 cron。fork 的生产 Worker workflow 有仓库身份限制。
-5. 测试通过后才合并主分支。生产采用 Git 自动部署，不手动发布 Vercel。国内部署不属于本次验收范围。
+5. 测试通过后才合并主分支。生产采用 Git 自动部署，不手动发布 Vercel。腾讯云 EdgeOne 已退役，站点统一使用 Vercel。
 
 ## 生产导入顺序
 

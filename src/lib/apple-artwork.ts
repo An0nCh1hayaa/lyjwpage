@@ -21,7 +21,7 @@ export function appleArtwork(url: string | null | undefined, size: number): stri
     .replace(/\{h\}/g, String(dimension))
     // 资料库那边的模板还带 {f}（格式）和 {c}（裁剪方式）
     // Apple CDN 能直接把目录封面编码成 WebP。这些图不走 Next 图片优化，
-    // 在源地址就选较小的格式，Vercel 和 EdgeOne 两边都能少传一半左右的字节。
+    // 在源地址就选较小的格式，浏览器可以少下载图片字节。
     .replace(/\{f\}/g, "webp")
     .replace(/\{c\}/g, "sr");
 }
@@ -35,10 +35,8 @@ export const ARTWORK_SCALE = 3;
 /**
  * 预签名封面是否交给部署平台的图片优化器。
  *
- * Vercel 通过自己的 `/_next/image` 原样回源，默认开启没有问题。EdgeOne 注入的
- * loader 会直接在 Apple URL 后追加 `imageMogr2` 参数；而 AWS SigV4 把查询串也
- * 算进签名，多一个参数就会验签失败。EdgeOne 因此在构建环境里把这个变量设成
- * `false`，让 `next/image` 原样输出源地址。写成完整的 `process.env.XXX` 字面量，
+ * Vercel 通过 `/_next/image` 原样回源。设为 `false` 时直接输出源地址，
+ * 避免图片 loader 修改查询串导致预签名链接失效。写成完整的 `process.env.XXX` 字面量，
  * Next 才能在客户端构建时替换它。
  */
 const SIGNED_IMAGE_OPTIMIZATION_ENABLED =

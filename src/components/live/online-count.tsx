@@ -85,7 +85,7 @@ function SourceHint({ connected }: { connected: boolean }) {
         <span className="absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-lg border border-line bg-surface p-3">
           <span className="label-mono block text-foreground">数据来源</span>
           <span className="mt-2 block text-xs normal-case leading-relaxed text-muted-foreground">
-            连接 Cloudflare Workers 的 Durable Objects 实例，按前台活跃 WebSocket 连接实时计数。包括 Vercel 源站与 EdgeOne 镜像以及所有的预览构建。
+            连接 Cloudflare Workers 的 Durable Objects 实例，按前台活跃 WebSocket 连接实时计数。包括 Vercel 生产站点以及所有的预览构建。
           </span>
           <span className="mt-3 flex items-center justify-between border-t border-line pt-2.5">
             <span className="label-mono text-muted-foreground">WebSocket</span>

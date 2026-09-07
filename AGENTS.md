@@ -26,10 +26,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # 部署流程
 
-- 站点生产部署默认走 Git：完成必要验证后提交改动，执行 `git push origin main`，由已有集成自动部署 Vercel（`lyjw.me`）和 EdgeOne（`lyjw131.com`）。用户要求部署站点时，包含完成这次提交与推送，无需再逐步确认。
+- 站点生产部署默认走 Git：完成必要验证后提交改动，执行 `git push origin main`，由已有集成自动部署 Vercel；腾讯云 EdgeOne 已退役，`lyjw131.com` 的 Vercel 绑定由用户完成。用户要求部署站点时，包含完成这次提交与推送，无需再逐步确认。
 - 除非用户明确要求手工部署，不运行 `vercel deploy`、`vercel --prod`、`vercel promote` 等手工发布命令；自动部署失败时先检查并修复现有流程。
-- 推送成功不等于部署完成：检查该次提交在两平台的部署状态，并从两个生产域名验证本次受影响的行为或配置。
-- NAS 上报器与其他独立部署单元按各自 README 发布。若依赖站点的新契约或更长陈旧窗口，先确认两份站点已生效，再切换上报器，最后验证真实上报与站点读取。
+- 推送成功不等于部署完成：检查该次提交在 Vercel 的部署状态，并从已绑定的生产域名验证本次受影响的行为或配置。
+- NAS 上报器与其他独立部署单元按各自 README 发布。若依赖站点的新契约或更长陈旧窗口，先确认 Vercel 站点及 Worker 契约已生效，再切换上报器，最后验证真实上报与站点读取。
 
 # API 命名与跨端契约
 

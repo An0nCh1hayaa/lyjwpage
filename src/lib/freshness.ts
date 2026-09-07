@@ -21,7 +21,7 @@
  * 主循环里（心跳补发的那个下限），两边都改完才算改完。
  *
  * 服务端可用 HEARTBEAT_WINDOW_MS 改 —— 注意生产环境里这个变量是显式配着的，
- * 改这里的默认值不会自动生效，Vercel 和 EdgeOne 两边都要跟着改。
+ * 改这里的默认值不会自动生效，数据后端的有效配置也要同步核对。
  * 浏览器用 payload 里盖上的那份，和充电头的 staleAfterMs 同一套。
  */
 export const HEARTBEAT_WINDOW_MS = 300_000;

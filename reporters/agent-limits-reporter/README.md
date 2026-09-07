@@ -28,7 +28,7 @@ PlayStation 上报器采用同款人数分档逻辑，限额使用自己的 5 / 
 
 长档每 5 分钟重查人数，发现更快档立即采集；人数减少不延后已经定好的下一轮。
 只查公开计数口，不带 ingest 密钥，也不在这些检查里访问厂商限额接口。
-API Worker 一份生产一个，`SITE_URL` 填 Vercel 那份，国内生产的后台连接不计入，少计只会减速。
+`SITE_URL` 使用统一 API Worker，所有连接该 Worker 的页面都计入人数。
 
 默认发 `claude` / `codex` / `grok` / `cursor` / `antigravity`。一家失败只影响那一行。
 
@@ -133,7 +133,7 @@ cursor 是 `{ period, plan, hardLimit }` 三份 DashboardService 响应。有它
 
 部署单元是同目录的 [compose.yaml](compose.yaml)：把这个目录整个拷到 NAS、旁边放一份 `.env`，就地 build。**别在 Mac 上 build 完把镜像拷过去** —— Mac 是 arm64、群晖是 x86_64，架构对不上。
 
-从固定间隔升级时，先将 Vercel / EdgeOne 两份站点部署为
+从固定间隔升级时，先将 API Worker 的新鲜度窗口更新为
 `AGENT_LIMITS_STALE_MS=11100000`（185 分钟，三轮闲档加缓存余量），删除旧的
 `AGENT_LIMITS_PUSH_INTERVAL_MS`。然后更新 NAS `.env`：删除 `PUSH_INTERVAL_MS`、
 `ONLINE_COUNTER_URL`、`LIVE_PUSH_URL`（人头数改从 `SITE_URL` 读），按需设置三档间隔，

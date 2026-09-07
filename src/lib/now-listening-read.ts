@@ -10,7 +10,7 @@ import type { ListeningPayload, NowListeningPayload } from "@/lib/types";
  * 必须和 `/api/status/listening/now` 读**同一份、同一种取法**：readStatus 按
  * STATUS_CACHE 选冻的还是直读，选 hero 也是 pickNowListening 那一套（存活、暂停
  * 宽限、HomePod 静默都在这一步现算）。浏览器是从那条端点知道此刻是哪首、再来
- * 这两条端点要歌词和封面的；这边要是走另一路，国内那份部署上就会出现「那边已经
+ * 这两条端点要歌词和封面的；这边要是走另一路，就会出现「那边已经
  * 是新歌、这边还是 10 分钟前的」，响应里的 songId / link 对不上号，浏览器只能
  * 一直等。
  *

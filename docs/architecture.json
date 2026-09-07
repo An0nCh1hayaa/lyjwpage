@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "主页全量上报与双站读取架构",
+    "title": "主页上报与 Vercel 读取架构",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "viewBox": [
@@ -27,14 +27,14 @@
       },
       {
         "id": "sites",
-        "label": "国内与国际站",
+        "label": "站点与数据后端",
         "focus": [
           "api",
-          "shared_redis",
+          "state_hub",
           "sites",
           "visitors"
         ],
-        "note": "两站读取同一个 Redis；Vercel 按 tag 失效，EdgeOne 状态 API 直读。"
+        "note": "Worker 通过 SQLite Durable Object 保存状态；Vercel 读取首屏快照，浏览器直连 Worker。"
       },
       {
         "id": "assets",
@@ -50,7 +50,7 @@
     ],
     "repository": {
       "url": "https://github.com/LYJW131/lyjwpage",
-      "revision": "c21ba21e8c0864e56a16d956e0362781aee2bc3b"
+      "revision": "f323611d70dedccaae1a6c8aa4d9d3d76b285a81"
     }
   },
   "components": [
@@ -218,11 +218,11 @@
       ]
     },
     {
-      "id": "shared_redis",
+      "id": "state_hub",
       "type": "database",
-      "label": "共享 Redis",
-      "sublabel": "遥测状态 · 历史 · 媒体凭据",
-      "tag": "Worker 写入 · 两站读取",
+      "label": "SQLite Durable Object",
+      "sublabel": "StateHub · 状态与历史",
+      "tag": "Worker 独占读写",
       "pos": [
         1047.1,
         100
@@ -233,16 +233,16 @@
       ],
       "sources": [
         {
-          "path": "src/lib/redis.ts"
+          "path": "workers/api/src/state-hub.ts"
         }
       ]
     },
     {
       "id": "sites",
       "type": "backend",
-      "label": "Next.js 双站",
-      "sublabel": "Vercel lyjw.me / EdgeOne lyjw131.com",
-      "tag": "首屏与状态 API · 国内禁用状态缓存",
+      "label": "Next.js · Vercel",
+      "sublabel": "lyjw.me · Git 自动部署",
+      "tag": "首屏 HTML · 后台重建",
       "pos": [
         1047.1,
         405
@@ -256,7 +256,7 @@
           "path": "src/app/page.tsx"
         },
         {
-          "path": "src/lib/status-cache.ts"
+          "path": "src/lib/public-home.ts"
         }
       ]
     },
@@ -385,17 +385,9 @@
     {
       "id": "store",
       "from": "api",
-      "to": "shared_redis",
-      "label": "写入状态",
+      "to": "state_hub",
+      "label": "读写状态",
       "variant": "emphasis"
-    },
-    {
-      "id": "read",
-      "from": "sites",
-      "to": "shared_redis",
-      "label": "读取同一份状态",
-      "fromSide": "top",
-      "toSide": "bottom"
     },
     {
       "id": "revalidate",
@@ -412,7 +404,7 @@
       "id": "page",
       "from": "sites",
       "to": "visitors",
-      "label": "首屏 + /api/status/*",
+      "label": "首屏 HTML",
       "fromSide": "bottom",
       "toSide": "top"
     },
@@ -420,7 +412,7 @@
       "id": "push",
       "from": "api",
       "to": "visitors",
-      "label": "/ws + /online/ws",
+      "label": "API + WebSocket",
       "variant": "emphasis"
     },
     {
@@ -442,31 +434,15 @@
         935.9,
         835
       ]
-    }
-  ],
-  "cards": [
-    {
-      "dot": "cyan",
-      "title": "一个 API 服务",
-      "items": [
-        "/ws 推送事件；/online/ws 统计可见页面；/count 返回两类人数。",
-        "Agent、server、PlayStation 按在线人数调频；最近在听由 cron 刷新。"
-      ]
     },
     {
-      "dot": "emerald",
-      "title": "两站共享状态",
-      "items": [
-        "Vercel：lyjw.me；EdgeOne：lyjw131.com。",
-        "仅 Worker 接收上报；站点无 ingest 路由和中继。"
-      ]
-    },
-    {
-      "dot": "violet",
-      "title": "来源与辅助服务",
-      "items": [
-        "HomePod：DSM 的 wo_shi、N100 的 zhu_wo_lyjw。",
-        "musickit-token Worker 为一起听签发 token；目录、歌词由站点按需读取。"
+      "id": "home_snapshot",
+      "from": "sites",
+      "to": "api",
+      "label": "GET /api/home",
+      "labelAt": [
+        886,
+        405
       ]
     }
   ]
