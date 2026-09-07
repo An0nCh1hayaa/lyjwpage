@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   changes:
+    if: github.repository == 'LYJW131/lyjwpage'
     runs-on: ubuntu-latest
     outputs:
       workers: ${{ steps.pick.outputs.workers }}
