@@ -12,7 +12,6 @@ import {
 import { useStatus } from "@/hooks/use-status";
 import { groupWeeks } from "@/lib/github-chart-compact";
 import { isHeatmapFuture } from "@/lib/heatmap-window";
-import { canonicalModelName } from "@/lib/model-identity";
 import { VIBECODING_YEAR_PATH } from "@/lib/paths";
 import type { GithubChartDay, StatusResponse, VibeCodingYearPayload } from "@/lib/types";
 import {
@@ -98,32 +97,29 @@ function MixBreakdown({
   return (
     <div className="mt-2 min-w-0 border-t border-line pt-1.5">
       <ul className="grid min-w-0 gap-1.5">
-        {rows.map((row) => {
-          const name = canonicalModelName(row.model);
-          return (
-            <li key={row.model} className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={name}>
-                  {name}
-                </span>
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-                  {compactTokens(row.tokens)}
-                </span>
+        {rows.map((row) => (
+          <li key={row.model} className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={row.model}>
+                {row.model}
+              </span>
+              <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                {compactTokens(row.tokens)}
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <div className="h-1 min-w-0 flex-1 bg-muted">
+                <div
+                  className="h-full bg-live"
+                  style={{ width: `${sharePercent(row.tokens, tokens)}%` }}
+                />
               </div>
-              <div className="mt-0.5 flex items-center gap-1.5">
-                <div className="h-1 min-w-0 flex-1 bg-muted">
-                  <div
-                    className="h-full bg-live"
-                    style={{ width: `${sharePercent(row.tokens, tokens)}%` }}
-                  />
-                </div>
-                <span className="w-7 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
-                  {formatPercent(row.tokens, tokens)}
-                </span>
-              </div>
-            </li>
-          );
-        })}
+              <span className="w-7 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+                {formatPercent(row.tokens, tokens)}
+              </span>
+            </div>
+          </li>
+        ))}
       </ul>
     </div>
   );
