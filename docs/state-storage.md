@@ -21,6 +21,8 @@ Worker 写入完成后，只有展示变化才 POST `/api/revalidate`。接口�
 
 Vercel 参照根 `.env.example`，仅公开后端源、缓存通知鉴权和图片配置。Worker 参照 `workers/ingest/.dev.vars.example` 与 wrangler.toml；GitHub Token 使用 Worker Secret，Apple Music 凭据来自 Mac 上报。`NEXT_PUBLIC_BACKEND_URL` 构建期写入前端，改值需要重新部署。
 
+迁移后从 Vercel 移除 `GITHUB_TOKEN`、`REDIS_URL`、R2 写入凭据及旧推送地址；保留 `TELEMETRY_INGEST_SECRET` 用于缓存通知。环境变量删除不影响已有部署的环境快照，必须在清理后通过 Git 生成新部署。删除项目变量不等于撤销原始凭据，源 Redis 可在回退观察期继续保留。
+
 ## 验证与发布
 
 1. `pnpm test`、`pnpm typecheck`、`pnpm exec tsc --noEmit -p workers/ingest/tsconfig.json`。
