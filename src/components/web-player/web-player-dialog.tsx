@@ -243,13 +243,16 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
           </div>
         </div>
 
-        {/* 正在放那首的同步歌词，按队列条目的目录 ID 去问；没在放、没词都不占位 */}
-        <PlayerLyrics
-          instance={player.instance}
-          nowPlaying={player.nowPlaying}
-          active={isItemActive}
-          seekEvent={seekEvent}
-        />
+        {/* 正在放那首的同步歌词：仅完整播放时展示，未登录 30 秒试听、没在放、没词都不占位 */}
+        {!previewing ? (
+          <PlayerLyrics
+            instance={player.instance}
+            nowPlaying={player.nowPlaying}
+            active={isItemActive}
+            seekEvent={seekEvent}
+            previewing={previewing}
+          />
+        ) : null}
 
         {!playable ? (
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">

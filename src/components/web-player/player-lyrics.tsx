@@ -27,6 +27,7 @@ export function PlayerLyrics({
   nowPlaying,
   active,
   seekEvent,
+  previewing = false,
 }: {
   instance: MusicKitInstance | null;
   nowPlaying: MediaItem | null;
@@ -34,8 +35,10 @@ export function PlayerLyrics({
   active: boolean;
   /** 控制条主动拖拽释放触发的 seek 事件 */
   seekEvent?: { targetMs: number; at: number } | null;
+  /** 未登录 30 秒试听时整块不占位、不请求歌词 */
+  previewing?: boolean;
 }) {
-  const songId = active ? catalogItemId(nowPlaying?.id) : null;
+  const songId = active && !previewing ? catalogItemId(nowPlaying?.id) : null;
   const hasLyrics = nowPlaying?.attributes?.hasLyrics ?? true;
   const { lyrics, songwriters, isLoading } = useLyrics(songId, hasLyrics);
   const reduced = useReducedMotion();
@@ -123,7 +126,7 @@ export function PlayerLyrics({
     };
   }, [instance, songId, nowPlaying]);
 
-  if (!songId) return null;
+  if (!songId || previewing) return null;
   // 没词也没在等：整块不占位。等的时候和 hero 一样先画骨架，免得歌词到了才把弹窗撑高
   if (!lyrics && !isLoading) return null;
   const track = anchor?.trackId === songId ? anchor : null;
