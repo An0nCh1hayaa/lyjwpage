@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Fragment } from "react";
+import { Fragment, type CSSProperties } from "react";
 
 import { appleArtwork, ARTWORK_SCALE, needsOptimizing } from "@/lib/apple-artwork";
 import { cn } from "@/lib/utils";
@@ -24,20 +24,23 @@ export function PlayerArtwork({
   artwork,
   size,
   className,
+  style,
   eager = false,
 }: {
   /** Apple 的模板 URL；null 只画灰底 */
   artwork: string | null;
   size: number;
   className?: string;
+  style?: CSSProperties;
   /** 预载用：离屏元素默认懒加载，永远不会进视口，得强制拉 */
   eager?: boolean;
 }) {
   const src = appleArtwork(artwork, size * ARTWORK_SCALE);
+  const defaultSizeStyle = className?.includes("size-") ? undefined : { width: size, height: size };
   return (
     <div
       className={cn("relative shrink-0 overflow-hidden bg-muted", className)}
-      style={{ width: size, height: size }}
+      style={{ ...defaultSizeStyle, ...style }}
     >
       {src ? (
         <Image

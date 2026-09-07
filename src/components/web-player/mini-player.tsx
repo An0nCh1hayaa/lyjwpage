@@ -7,8 +7,9 @@ import { useWebPlayer } from "@/components/web-player/web-player-provider";
 import { PLAYBACK_STATE } from "@/lib/musickit";
 
 /**
- * 页头主题按钮旁的缩略播放器：一张封面加一颗播放 / 暂停。
- * 不放文字 —— 页头右侧那格在手机上很窄，和主题按钮一样只有 32px 高。
+ * 页头主题按钮旁的缩略播放器：
+ * 手机端（< sm）只展示封面图标，尺寸与主题按钮保持一致（32×32），避免空间拥挤；
+ * 桌面端（>= sm）额外展示播放 / 暂停快捷按钮。
  */
 export function MiniPlayer() {
   const player = useWebPlayer();
@@ -21,18 +22,24 @@ export function MiniPlayer() {
   const isPlaying = player.playbackState === PLAYBACK_STATE.playing;
 
   return (
-    <div className="paper-card flex h-8 items-center gap-1 rounded-md border border-line-strong bg-surface px-1">
-      {/* 封面按钮：点击回到播放器展开页 */}
+    <div className="paper-card flex size-8 items-center overflow-hidden rounded-md border border-line-strong bg-surface p-0 sm:h-8 sm:w-auto sm:gap-1 sm:p-1">
+      {/* 封面按钮：点击回到播放器展开页（优先展示当前正在播放的专辑） */}
       <button
         type="button"
         aria-label="打开播放器"
-        onClick={player.openDialog}
-        className="flex items-center justify-center rounded-sm transition-opacity hover:opacity-80"
+        onClick={() => {
+          if (player.activeItem) {
+            player.openWith(player.activeItem);
+          } else {
+            player.openDialog();
+          }
+        }}
+        className="flex size-full items-center justify-center overflow-hidden transition-opacity hover:opacity-80 sm:size-6 sm:rounded-sm"
       >
         <PlayerArtwork
-          artwork={player.item?.artwork ?? null}
+          artwork={(player.activeItem ?? player.item)?.artwork ?? null}
           size={MINI_ARTWORK_PX}
-          className="rounded-sm"
+          className="size-full sm:size-6 sm:rounded-sm"
         />
       </button>
 
@@ -40,7 +47,7 @@ export function MiniPlayer() {
         type="button"
         aria-label={isPlaying ? "暂停" : "播放"}
         onClick={player.toggle}
-        className="p-1 text-muted-foreground transition-colors hover:text-foreground"
+        className="hidden p-1 text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
       >
         {isPlaying ? (
           <Pause className="size-4" aria-hidden />

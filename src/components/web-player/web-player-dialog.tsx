@@ -5,7 +5,8 @@ import { ExternalLink, Pause, Play, SkipBack, SkipForward, X } from "lucide-reac
 
 import { DialogButton } from "@/components/live/listen-along-button";
 import { Modal } from "@/components/ui/modal";
-import { DIALOG_ARTWORK_PX, PlayerArtwork } from "@/components/web-player/player-artwork";
+import { PlayerCover } from "@/components/web-player/player-cover";
+import { PlayerLyrics } from "@/components/web-player/player-lyrics";
 import type { WebPlayer } from "@/hooks/use-web-player";
 import { PLAYBACK_STATE } from "@/lib/musickit";
 import { catalogItemId } from "@/lib/playing-queue";
@@ -15,6 +16,7 @@ import {
   formatClock,
   PLAYLIST_MAX_HEIGHT_PX,
   queueOptionsFor,
+  snapPlaylistScrollTop,
 } from "@/lib/web-player";
 
 /** 滑块上会改值的键。松开这些才 seek，别的键（Tab / Escape）路过不算 */
@@ -29,6 +31,59 @@ const SEEK_KEYS = new Set([
   "PageDown",
 ]);
 
+const SETTLE_DELAY_MS = 110;
+const SUSPEND_AFTER_CHANGE_MS = 400;
+
+/**
+ * 保证歌单列表停在整行上：参考 PlayStation 奖杯明细的停滚吸附实现，
+ * 不用 CSS scroll-snap（防止打断手势和滚轮自然动量），只在用户停滚 110ms 后平滑对齐到最近整行。
+ */
+function usePlaylistSnap(albumId: string | null | undefined) {
+  const node = useRef<HTMLDivElement | null>(null);
+  const previous = useRef(albumId);
+  const suspendUntil = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (previous.current === albumId) return;
+    previous.current = albumId;
+    suspendUntil.current = Date.now() + SUSPEND_AFTER_CHANGE_MS;
+
+    const el = node.current;
+    if (!el || el.scrollTop === 0) return;
+    const saved = el.style.scrollBehavior;
+    el.style.scrollBehavior = "auto";
+    el.scrollTop = 0;
+    el.style.scrollBehavior = saved;
+  }, [albumId]);
+
+  return useCallback((el: HTMLDivElement | null) => {
+    node.current = el;
+    if (!el) return;
+
+    const onScroll = () => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => {
+        if (Date.now() < suspendUntil.current) return;
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        const target = snapPlaylistScrollTop(el.scrollTop, maxScroll);
+        if (Math.abs(target - el.scrollTop) < 0.5) return;
+        const reduced =
+          typeof window !== "undefined" &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollTo({ top: target, behavior: reduced ? "auto" : "smooth" });
+      }, SETTLE_DELAY_MS);
+    };
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (timer.current) clearTimeout(timer.current);
+      node.current = null;
+    };
+  }, []);
+}
+
 /**
  * 播放器的展开页。
  *
@@ -39,20 +94,27 @@ const SEEK_KEYS = new Set([
  */
 export function WebPlayerDialog({ player }: { player: WebPlayer }) {
   const titleId = useId();
-  const [positionMs, setPositionMs] = useState(0);
-  const [durationMs, setDurationMs] = useState(0);
+  const listRef = usePlaylistSnap(player.item?.id);
+  const [activePositionMs, setActivePositionMs] = useState(0);
+  const [activeDurationMs, setActiveDurationMs] = useState(0);
   const [, setIsDragging] = useState(false);
+  const [seekEvent, setSeekEvent] = useState<{ targetMs: number; at: number } | null>(null);
 
   const isDraggingRef = useRef(false);
   const seekingTargetMsRef = useRef<number | null>(null);
   const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const item = player.item;
+  const isItemActive = player.isItemActive;
   const isStarting = player.status === "starting";
-  const isPlaying = player.playbackState === PLAYBACK_STATE.playing;
+  const hasQueue = player.queue.length > 0;
+  const isPlaying = isItemActive && player.playbackState === PLAYBACK_STATE.playing;
   const playable = item ? queueOptionsFor(item) !== null : false;
   /** 未授权时放的是 30 秒试听，进度那一行要标出来 */
   const previewing = !player.authorized;
+
+  const positionMs = isItemActive ? activePositionMs : 0;
+  const durationMs = isItemActive ? activeDurationMs : 0;
 
   useEffect(() => {
     return () => {
@@ -71,7 +133,8 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
       isDraggingRef.current = false;
       setIsDragging(false);
       seekingTargetMsRef.current = targetMs;
-      setPositionMs(targetMs);
+      setActivePositionMs(targetMs);
+      setSeekEvent({ targetMs, at: Date.now() });
 
       if (seekTimeoutRef.current) {
         clearTimeout(seekTimeoutRef.current);
@@ -89,7 +152,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
             Math.abs(currentMs - targetMs) <= 1500
           ) {
             seekingTargetMsRef.current = null;
-            setPositionMs(currentMs);
+            setActivePositionMs(currentMs);
           }
         }
       });
@@ -102,10 +165,13 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
    * 放进 context 会让页头和整张卡片跟着每秒重渲染。
    *
    * 依赖项不含 isDragging，避免拖动开始和结束时频繁注销/重挂载并在首帧触发 onTime 覆盖新位置。
+   * 非当前播放专辑时 positionMs 与 durationMs 自动计算为 0，防止把正在后台播放的另一张专辑进度错画进来。
    */
   useEffect(() => {
     const inst = player.instance;
-    if (!inst) return;
+    if (!inst || !player.isItemActive) {
+      return;
+    }
 
     const onTime = () => {
       if (isDraggingRef.current) return;
@@ -121,13 +187,13 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
         seekingTargetMsRef.current = null;
       }
 
-      setPositionMs(currentMs);
+      setActivePositionMs(currentMs);
 
       const dur = (inst.currentPlaybackDuration || 0) * 1000;
       if (dur > 0) {
-        setDurationMs(dur);
+        setActiveDurationMs(dur);
       } else if (player.nowPlaying?.attributes?.durationInMillis) {
-        setDurationMs(player.nowPlaying.attributes.durationInMillis);
+        setActiveDurationMs(player.nowPlaying.attributes.durationInMillis);
       }
     };
 
@@ -136,7 +202,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
     return () => {
       inst.removeEventListener("playbackTimeDidChange", onTime);
     };
-  }, [player.instance, player.nowPlaying]);
+  }, [player.instance, player.isItemActive, player.nowPlaying]);
 
   return (
     <Modal titleId={titleId} onClose={player.closeDialog} className="max-w-md">
@@ -159,17 +225,14 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
 
       <div className="px-4">
         <div className="mt-3 flex items-center gap-3">
-          <PlayerArtwork
-            artwork={item?.artwork ?? null}
-            size={DIALOG_ARTWORK_PX}
-            className="rounded-md border border-line"
-          />
+          {/* 有动态封面就放动态的，静态那层和预载的是同一张，见 player-cover */}
+          <PlayerCover item={item} />
           <div className="flex min-w-0 flex-1 flex-col justify-center">
             <div className="truncate font-medium">{item?.title}</div>
             <div className="truncate text-sm text-muted-foreground">{item?.artist}</div>
             {/* 当前曲名那一行没有内容时也占位，免得队列装好那一下整块往下跳 */}
             <div className="min-h-5 truncate text-sm text-foreground">
-              {player.nowPlaying?.attributes?.name ?? (
+              {(isItemActive ? player.nowPlaying?.attributes?.name : null) ?? (
                 <span className="invisible select-none" aria-hidden>
                   &nbsp;
                 </span>
@@ -177,6 +240,14 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
             </div>
           </div>
         </div>
+
+        {/* 正在放那首的同步歌词，按队列条目的目录 ID 去问；没在放、没词都不占位 */}
+        <PlayerLyrics
+          instance={player.instance}
+          nowPlaying={player.nowPlaying}
+          active={isItemActive}
+          seekEvent={seekEvent}
+        />
 
         {!playable ? (
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
@@ -195,32 +266,41 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
               <input
                 type="range"
                 aria-label="播放进度"
+                disabled={!isItemActive}
                 min={0}
                 max={durationMs > 0 ? durationMs : 1000}
                 step={1000}
                 value={Math.min(positionMs, durationMs > 0 ? durationMs : 1000)}
                 onPointerDown={() => {
+                  if (!isItemActive) return;
                   isDraggingRef.current = true;
                   setIsDragging(true);
                 }}
                 onChange={(e) => {
+                  if (!isItemActive) return;
                   isDraggingRef.current = true;
                   setIsDragging(true);
-                  setPositionMs(Number(e.target.value));
+                  setActivePositionMs(Number(e.target.value));
                 }}
                 onPointerUp={(e) => {
+                  if (!isItemActive) return;
                   commitSeek(Number((e.target as HTMLInputElement).value));
                 }}
                 onPointerCancel={(e) => {
+                  if (!isItemActive) return;
                   commitSeek(Number((e.target as HTMLInputElement).value));
                 }}
                 onKeyUp={(e) => {
+                  if (!isItemActive) return;
                   // 只认真的在挪滑块的键：Tab 走开、Escape 关窗也会经过这里，
                   // 那时 seek 一下等于把正在放的歌拽回滑块当前的整秒
                   if (!SEEK_KEYS.has(e.key)) return;
                   commitSeek(Number((e.target as HTMLInputElement).value));
                 }}
-                className="w-full cursor-pointer accent-live"
+                className={cn(
+                  "w-full accent-live",
+                  isItemActive ? "cursor-pointer" : "cursor-default opacity-50",
+                )}
               />
               <div className="label-mono flex justify-between text-muted-foreground tabular-nums">
                 <span>{formatClock(positionMs)}</span>
@@ -236,7 +316,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
               <button
                 type="button"
                 aria-label="上一首"
-                disabled={isStarting}
+                disabled={isStarting || !isItemActive}
                 onClick={player.previous}
                 className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
               >
@@ -247,7 +327,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
                 type="button"
                 aria-label={isPlaying ? "暂停" : "播放"}
                 disabled={isStarting}
-                onClick={player.toggle}
+                onClick={isItemActive ? player.toggle : player.play}
                 className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
               >
                 {isPlaying ? (
@@ -259,7 +339,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
               <button
                 type="button"
                 aria-label="下一首"
-                disabled={isStarting}
+                disabled={isStarting || !isItemActive}
                 onClick={player.next}
                 className="p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
               >
@@ -269,37 +349,35 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
 
             {/* 队列登录前就显示：有缓存或已装载时，打开弹窗前就计算好高度，防止跳动 */}
             {(() => {
-              const count = player.queue.length;
-              const hasQueue = count > 0;
+              if (!hasQueue && !isStarting) return null;
+
               const targetHeight = hasQueue
-                ? computePlaylistHeight(count)
-                : isStarting
-                  ? PLAYLIST_MAX_HEIGHT_PX
-                  : undefined;
+                ? computePlaylistHeight(player.queue.length)
+                : PLAYLIST_MAX_HEIGHT_PX;
 
               return (
                 <div
-                  className="mt-3 max-h-56 overflow-y-auto border-t border-line"
-                  style={targetHeight != null ? { height: `${targetHeight}px` } : undefined}
+                  ref={listRef}
+                  className="mt-3 max-h-[237px] overflow-y-auto border-t border-line py-1.5"
+                  style={{ height: `${targetHeight}px` }}
                 >
                   {!hasQueue ? (
-                    isStarting ? (
-                      <div aria-hidden>
-                        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                          <div
-                            key={i}
-                            className="flex h-8 animate-pulse items-center gap-2 px-1 py-1.5"
-                          >
-                            <div className="h-3.5 w-5 rounded bg-muted" />
-                            <div className="h-3.5 flex-1 rounded bg-muted" />
-                            <div className="h-3.5 w-8 rounded bg-muted" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : null
+                    <div aria-hidden>
+                      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                        <div
+                          key={i}
+                          className="flex h-8 animate-pulse items-center gap-2 px-1 py-1.5"
+                        >
+                          <div className="h-3.5 w-5 rounded bg-muted" />
+                          <div className="h-3.5 flex-1 rounded bg-muted" />
+                          <div className="h-3.5 w-8 rounded bg-muted" />
+                        </div>
+                      ))}
+                    </div>
                   ) : (
                     player.queue.map((song, index) => {
                       const isCurrent =
+                        isItemActive &&
                         catalogItemId(song.id) === catalogItemId(player.nowPlaying?.id);
                       return (
                         <button
@@ -337,8 +415,13 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
         ) : null}
       </div>
 
-      <div className="mt-4 flex border-t border-line">
-        {!playable ? null : player.active ? (
+      <div
+        className={cn(
+          "flex border-t border-line",
+          (hasQueue || isStarting) && !player.error ? "mt-0" : "mt-4",
+        )}
+      >
+        {!playable ? null : isItemActive ? (
           <DialogButton onClick={player.stop}>Stop</DialogButton>
         ) : (
           // 点封面只是打开这张卡片，真正出声从这里（或中间那颗播放键）开始

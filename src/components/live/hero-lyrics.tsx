@@ -42,7 +42,13 @@ export const LYRIC_LINE_VARIANTS = {
  */
 export function LyricWords({ words, track }: { words: LyricWord[]; track: LocalNowPlaying }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const { state, observedAt, positionMs, durationMs, repeatOne } = track;
+  const maxAtRef = useRef<number>(0);
+  const { state, observedAt, positionMs, durationMs, repeatOne, trackId } = track;
+
+  useEffect(() => {
+    // 换行、切歌或关键节点同步（observedAt 改变）时重置最大进度，使新的一句从头计算
+    maxAtRef.current = 0;
+  }, [words, trackId, observedAt]);
 
   useEffect(() => {
     const node = ref.current;
@@ -51,16 +57,31 @@ export function LyricWords({ words, track }: { words: LyricWord[]; track: LocalN
 
     const paint = () => {
       const at = trackPositionMs(anchor, Date.now());
+      let currentAt = at;
+      if (state === "playing") {
+        // 用户手动大幅向后拖拽（> 1500ms）允许回退；正常播放过程中时间单调递增，防止微小抖动导致字往回跳
+        if (at < maxAtRef.current - 1500) {
+          maxAtRef.current = at;
+          currentAt = at;
+        } else {
+          currentAt = Math.max(at, maxAtRef.current);
+          maxAtRef.current = currentAt;
+        }
+      } else {
+        maxAtRef.current = at;
+        currentAt = at;
+      }
+
       words.forEach((word, i) => {
         const span = node.children[i] as HTMLElement | undefined;
         if (!span) return;
         const lengthMs = word.endMs - word.startMs;
         const ratio =
           lengthMs <= 0
-            ? at >= word.startMs
+            ? currentAt >= word.startMs
               ? 1
               : 0
-            : Math.max(0, Math.min(1, (at - word.startMs) / lengthMs));
+            : Math.max(0, Math.min(1, (currentAt - word.startMs) / lengthMs));
 
         if (ratio <= 0) {
           if (span.dataset.sung !== "pending") {
@@ -122,7 +143,7 @@ export function HeroLyrics({
   const playing = track.state === "playing";
   const mountedAt = useMountedAt();
   const [ticked, setTicked] = useState(0);
-  const now = ticked || mountedAt;
+  const now = (playing && mountedAt ? Math.max(ticked, track.observedAt) : ticked) || mountedAt;
 
   useEffect(() => {
     if (!playing) return;

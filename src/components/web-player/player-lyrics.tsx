@@ -1,12 +1,13 @@
 "use client";
 
 import { useReducedMotion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { HeroLyrics, HeroLyricsSkeleton } from "@/components/live/hero-lyrics";
 import { useLyrics } from "@/hooks/use-lyrics";
 import { PLAYBACK_STATE, type MediaItem, type MusicKitInstance } from "@/lib/musickit";
 import { catalogItemId } from "@/lib/playing-queue";
+import { trackPositionMs } from "@/lib/track-position";
 import type { LocalNowPlaying } from "@/lib/types";
 
 /**
@@ -18,30 +19,39 @@ import type { LocalNowPlaying } from "@/lib/types";
  * 「没有」，浏览器那侧只记一小时。
  *
  * HeroLyrics 要的是一个锚点（state / observedAt / positionMs），位置由它自己的
- * 计时器按 lib/track-position 往前推。这里把 MusicKit 的进度每秒抄成一个锚点：
- * 抄的那一刻 observedAt 就是现在，推出来的位置和进度条走的是同一个数。
- * 状态只在这个组件里，不进 Provider —— 每秒一次的更新不该让整棵树跟着重画。
+ * 计时器按 lib/track-position 往前推。歌词时间轴独立运行，绝不频繁绑定高频音频时间戳，
+ * 仅在关键节点同步：状态变化（播放/暂停）、换歌、主动拖拽进度条 seek、以及严重脱轨时校准。
  */
 export function PlayerLyrics({
   instance,
   nowPlaying,
   active,
+  seekEvent,
 }: {
   instance: MusicKitInstance | null;
   nowPlaying: MediaItem | null;
   /** 只有出过声才显示：没在放的时候队列里的第一首不算「正在唱」 */
   active: boolean;
+  /** 控制条主动拖拽释放触发的 seek 事件 */
+  seekEvent?: { targetMs: number; at: number } | null;
 }) {
   const songId = active ? catalogItemId(nowPlaying?.id) : null;
   const hasLyrics = nowPlaying?.attributes?.hasLyrics ?? true;
   const { lyrics, songwriters, isLoading } = useLyrics(songId, hasLyrics);
   const reduced = useReducedMotion();
   const [anchor, setAnchor] = useState<LocalNowPlaying | null>(null);
+  const anchorRef = useRef<LocalNowPlaying | null>(null);
 
   useEffect(() => {
-    if (!instance || !songId) return;
-    const attributes = nowPlaying?.attributes;
-    const read = () => {
+    anchorRef.current = anchor;
+  }, [anchor]);
+
+  // 关键节点 1：用户在控制条主动 seek，立即对齐歌词时钟
+  const [prevSeekEvent, setPrevSeekEvent] = useState(seekEvent);
+  if (seekEvent !== prevSeekEvent) {
+    setPrevSeekEvent(seekEvent);
+    if (seekEvent && instance && songId) {
+      const attributes = nowPlaying?.attributes;
       setAnchor({
         source: "apple-music",
         state: instance.playbackState === PLAYBACK_STATE.playing ? "playing" : "paused",
@@ -50,18 +60,66 @@ export function PlayerLyrics({
         album: attributes?.albumName ?? null,
         trackId: songId,
         artworkUrl: null,
-        positionMs: Math.max(0, (instance.currentPlaybackTime || 0) * 1000),
+        positionMs: Math.max(0, seekEvent.targetMs),
         durationMs: Math.max(0, (instance.currentPlaybackDuration || 0) * 1000),
         repeatOne: false,
-        observedAt: Date.now(),
+        observedAt: seekEvent.at,
+      });
+    }
+  }
+
+  useEffect(() => {
+    if (!instance || !songId) return;
+    const attributes = nowPlaying?.attributes;
+
+    const syncAnchor = () => {
+      const now = Date.now();
+      const posSec = instance.currentPlaybackTime || 0;
+      const posMs = Math.max(0, posSec * 1000);
+      const isPlaying = instance.playbackState === PLAYBACK_STATE.playing;
+
+      setAnchor({
+        source: "apple-music",
+        state: isPlaying ? "playing" : "paused",
+        title: attributes?.name ?? null,
+        artist: attributes?.artistName ?? null,
+        album: attributes?.albumName ?? null,
+        trackId: songId,
+        artworkUrl: null,
+        positionMs: posMs,
+        durationMs: Math.max(0, (instance.currentPlaybackDuration || 0) * 1000),
+        repeatOne: false,
+        observedAt: now,
       });
     };
-    read();
-    instance.addEventListener("playbackTimeDidChange", read);
-    instance.addEventListener("playbackStateDidChange", read);
+
+    // 关键节点 2：曲目加载 / 换歌时初始化起点
+    syncAnchor();
+
+    // 关键节点 3：播放状态翻转（播放、暂停、等待缓冲）时同步
+    const onState = () => syncAnchor();
+
+    // 关键节点 4：仅在发生外部 Seek、单曲循环绕回开头或休眠唤醒（偏差 > 1500ms）时校准
+    // 正常播放期间严禁监听音频时间戳更新锚点，歌词时间轴独立向前平滑推进
+    const onTime = () => {
+      if (!anchorRef.current) return;
+      const isPlaying = instance.playbackState === PLAYBACK_STATE.playing;
+      if (!isPlaying) return;
+
+      const currentMs = Math.max(0, (instance.currentPlaybackTime || 0) * 1000);
+      const estimatedMs = trackPositionMs(anchorRef.current, Date.now());
+      const diff = Math.abs(currentMs - estimatedMs);
+
+      if (diff > 1500) {
+        syncAnchor();
+      }
+    };
+
+    instance.addEventListener("playbackStateDidChange", onState);
+    instance.addEventListener("playbackTimeDidChange", onTime);
     return () => {
-      instance.removeEventListener("playbackTimeDidChange", read);
-      instance.removeEventListener("playbackStateDidChange", read);
+      instance.removeEventListener("playbackStateDidChange", onState);
+      instance.removeEventListener("playbackTimeDidChange", onTime);
     };
   }, [instance, songId, nowPlaying]);
 

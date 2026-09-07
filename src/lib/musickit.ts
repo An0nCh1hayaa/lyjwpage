@@ -70,7 +70,12 @@ export type MediaItemAttributes = {
   /** 目录说这首有没有歌词。和 NowListeningPayload.hasLyrics 同一个来源，没有就不去问 /api/lyrics */
   hasLyrics?: boolean;
 };
-export type MediaItem = { id?: string; attributes?: MediaItemAttributes };
+export type MediaItem = {
+  id?: string;
+  attributes?: MediaItemAttributes;
+  /** MusicKit 内部标志：是否属于 Apple 自动推荐填充的 Autoplay 曲目 */
+  isAutoplay?: boolean;
+};
 /** setQueue 接受的几种形态，只列用到的。startTime 被否决（见下面接口上的注释），别加回来 */
 export type QueueOptions = {
   song?: string;
@@ -96,7 +101,11 @@ export type MusicKitInstance = {
   /** 0–1 */
   volume: number;
   nowPlayingItem: MediaItem | null;
-  queue?: { items?: MediaItem[] };
+  queue?: {
+    items?: MediaItem[];
+    userAddedItems?: MediaItem[];
+    autoplayItems?: MediaItem[];
+  };
   /** 队列里有下一首时让它自己接着播。单曲循环时要关掉，否则会去接下首 */
   autoplayEnabled?: boolean;
   /** 见 REPEAT_MODE。单曲循环是 one，跟听平时是 none */
