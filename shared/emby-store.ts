@@ -1,4 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
+import { mirrorKey } from "@/lib/storage";
 import type { WatchingItem } from "@/lib/types";
 
 /** 事件之间可能隔很久（一部电影两小时只有首尾两条），保留时间要足够宽 */
@@ -30,7 +30,7 @@ export type EmbyNowPlaying = {
   at: number;
 };
 
-/** Redis 为主、进程内存为辅，规则见 lib/redis 的 mirrorKey */
+/** Storage 为主、进程内存为辅，规则见 lib/storage 的 mirrorKey */
 export const mirror = mirrorKey<EmbyNowPlaying>(["emby", "nowPlaying"], (state) => state.at, {
   ttlMs: TTL_MS,
 });
@@ -39,7 +39,7 @@ export const mirror = mirrorKey<EmbyNowPlaying>(["emby", "nowPlaying"], (state) 
  * 存下来的一项，图片位上放的是「图片键」而不是地址。
  *
  * 键到地址的映射单独存（见下面的 images 镜像），落地时不把地址烧进条目里 ——
- * 图片和列表是分两次推来的：列表先到、图片可能还在路上，或者 Redis 被清空后
+ * 图片和列表是分两次推来的：列表先到、图片可能还在路上，或者 SQLite 被清空后
  * 只需补推图片。地址在读取时才解析，晚到的那批图能把已经存着的列表一起点亮，
  * 不用把整个列表重推一遍。
  */

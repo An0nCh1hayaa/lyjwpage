@@ -11,7 +11,7 @@ import { site } from "@/lib/site";
 
 /**
  * 首页段的错误边界。错误边界必须是客户端组件，导不出 metadata，标题用
- * React 的 <title> 元素自己拼。error.message 不端给访客：里面可能带 Redis
+ * React 的 <title> 元素自己拼。error.message 不端给访客：里面可能带 SQLite
  * 地址、上游响应之类的内部信息，只进 console。
  */
 export default function Error({

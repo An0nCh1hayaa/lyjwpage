@@ -3,39 +3,39 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { heartbeatWindowMs } from "@/lib/freshness";
-import { installRedisForTests, resetRedisForTests } from "@/lib/redis";
+import { installStorageForTests, resetStorageForTests } from "@/lib/storage";
 import {
   nextLiveness,
   offlineByLiveness,
   readLiveness,
 } from "@/lib/reporter-liveness";
-import { FakeRedis } from "@/lib/testing/fake-redis";
+import { FakeStorage } from "@/lib/testing/fake-storage";
 
 test.beforeEach(() => {
-  resetRedisForTests();
+  resetStorageForTests();
 });
 
 test.afterEach(() => {
-  resetRedisForTests();
+  resetStorageForTests();
 });
 
 test("从没见过上报器时是 lastSeenAt 0", async () => {
-  installRedisForTests(new FakeRedis());
+  installStorageForTests(new FakeStorage());
   assert.deepEqual(await readLiveness(), { lastSeenAt: 0, declaredOffline: false });
 });
 
 test("writeLiveness 之后 readLiveness 读到同一份", async () => {
-  installRedisForTests(new FakeRedis());
+  installStorageForTests(new FakeStorage());
   const live = { lastSeenAt: 42, declaredOffline: false };
   await writeLiveness(live);
   assert.deepEqual(await readLiveness(), live);
 });
 
-test("Redis 不可达时存活仍留在内存里", async () => {
-  const redis = new FakeRedis();
-  installRedisForTests(redis);
+test("Storage 不可达时存活仍留在内存里", async () => {
+  const storage = new FakeStorage();
+  installStorageForTests(storage);
   await writeLiveness({ lastSeenAt: 42, declaredOffline: false });
-  redis.setUnreachable();
+  storage.setUnreachable();
   await writeLiveness({ lastSeenAt: 99, declaredOffline: true });
   assert.deepEqual(await readLiveness(), { lastSeenAt: 99, declaredOffline: true });
 });

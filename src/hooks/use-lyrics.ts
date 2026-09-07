@@ -1,3 +1,5 @@
+"use client";
+import { backendUrl } from "@/lib/backend-url";
 import { useEffect, useState } from "react";
 
 import type { LyricLine } from "@/lib/lyrics-ttml";
@@ -71,7 +73,7 @@ async function fetchLyrics(songId: string): Promise<CachedLyricsData | null> {
   const promise = (async () => {
     try {
       const response = await fetch(
-        `${LYRICS_ENDPOINT}?song=${encodeURIComponent(songId)}&format=${LYRICS_FORMAT}`,
+        backendUrl(`${LYRICS_ENDPOINT}?song=${encodeURIComponent(songId)}&format=${LYRICS_FORMAT}`),
       );
       if (!response.ok) {
         emptyUntil.set(songId, Date.now() + FAILURE_TTL_MS);

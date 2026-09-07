@@ -21,7 +21,7 @@ const ICON_PX = 56;
  * 换部署会重压一次，这是它的机制，不是这里的意图。）
  *
  * 不直接 fetch 传进来的那个 URL，而是拿校验过的 objectKey 重新拼：`iconUrl`
- * 是 Redis 里的 objectKey 在读取时经 `publicAssetUrl` 拼出来的（见 telemetry），
+ * 是 SQLite 里的 objectKey 在读取时经 `publicAssetUrl` 拼出来的（见 telemetry），
  * 这里原样倒推回去，值不会变，但取图的地址被钉死在本部署自己的交付域上，
  * 不会因为上游存了个意外的字符串就把服务端 fetch 带去别处。
  *

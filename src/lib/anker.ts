@@ -40,7 +40,7 @@ export function chargerStaleAfterMs() {
  * 和 main 同一套收卡口径：上报器离线或充电头自己太久没推，就把 connected
  * 打成 false。卡片只看这个字段，不在浏览器再算一遍过期。
  *
- * 快照里留 Redis 原样的 connected；过期是时间函数，在取数出口现盖
+ * 快照里留 SQLite 原样的 connected；过期是时间函数，在取数出口现盖
  * （首页填缓存、API overlay、推送），不要写进 cachedChargerSnapshot。
  */
 export function withChargerFreshness(
@@ -91,7 +91,7 @@ export async function getChargerSnapshot(): Promise<ChargerPayload> {
   );
 }
 
-/** 按客户端游标切历史。不重读 Redis，给缓存命中之后的增量路径用。 */
+/** 按客户端游标切历史。不重读 Storage，给缓存命中之后的增量路径用。 */
 export function sliceChargerHistory(payload: ChargerPayload, since?: number): ChargerPayload {
   const all = payload.history;
   const oldest = all[0]?.t;
@@ -109,7 +109,7 @@ export function sliceChargerHistory(payload: ChargerPayload, since?: number): Ch
 }
 
 /**
- * 插拔时推给浏览器的那一份，全部拿手上现成的东西拼，一次 Redis 都不读。
+ * 插拔时推给浏览器的那一份，全部拿手上现成的东西拼，一次 SQLite 都不读。
  *
  * 从前这里是 `getChargerPayload({ since: Date.now() })`：为了得到一份「不带历史
  * 点的增量」，先要把整条 400 点曲线读回来，再让 sliceChargerHistory 原样丢掉 ——

@@ -1,4 +1,4 @@
-import { key } from "@/lib/redis";
+import { key } from "@/lib/storage";
 import type { ChargerSample, ChargerStatus } from "@/lib/types";
 
 /** 连续断联满半小时后，旧曲线不再属于下一次连接。 */
@@ -11,11 +11,11 @@ export const K_HISTORY = key("charger", "history");
 export const K_LAST_PUSH = key("charger", "lastPush");
 
 /**
- * Redis 不可达时的退路。规则和 lib/redis 的 mirrorKey 一致，这里手写是因为
+ * SQLite 不可达时的退路。规则和 lib/storage 的 mirrorKey 一致，这里手写是因为
  * 充电头是两个 string 键加一条 list，套不进单键那个工厂。
  *
- * `persisted` 记的是内存这份有没有真落进 Redis：没落进去时它就是唯一真相，
- * Redis 说「没有」不能当成「被删了」。
+ * `persisted` 记的是内存这份有没有真落进 SQLite：没落进去时它就是唯一真相，
+ * SQLite 说「没有」不能当成「被删了」。
  */
 export const fallback = {
   latest: null as ChargerStatus | null,

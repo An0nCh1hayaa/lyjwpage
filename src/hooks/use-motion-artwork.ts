@@ -1,3 +1,5 @@
+"use client";
+import { backendUrl } from "@/lib/backend-url";
 import { useEffect, useState } from "react";
 
 export type MotionArtworkResult = {
@@ -44,7 +46,7 @@ export async function fetchMotionArtwork(
 
   const promise = (async () => {
     try {
-      const response = await fetch(`${MOTION_ENDPOINT}?url=${encodeURIComponent(url)}`);
+      const response = await fetch(backendUrl(`${MOTION_ENDPOINT}?url=${encodeURIComponent(url)}`));
 
       if (!response.ok) {
         return null;

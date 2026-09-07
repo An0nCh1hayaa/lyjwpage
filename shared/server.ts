@@ -1,4 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
+import { mirrorKey } from "@/lib/storage";
 import type { ServerStatus } from "@/lib/types";
 
 /** 一周。机器重启几天再回来时，卡片该说的是「这是上次那份」，不是「从没收到过」 */

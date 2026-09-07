@@ -2,7 +2,7 @@
  * 充电设备负载的类型收敛。纯函数，客户端和 ingest 共用。
  *
  * 上报器 `chargingDevices.devices[]` 和本机 SSE 的 `device` 是同一形状：
- * 公共字段在顶层，设备特有的收在子对象。这里不碰 Redis。
+ * 公共字段在顶层，设备特有的收在子对象。这里不碰 SQLite。
  */
 
 import { IMAGE_OBJECT_KEY } from "./asset-url.ts";

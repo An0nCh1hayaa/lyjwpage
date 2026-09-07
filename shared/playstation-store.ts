@@ -1,4 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
+import { mirrorKey } from "@/lib/storage";
 import type {
   PlaystationPlayingPayload,
   PlaystationPresencePayload,
@@ -10,7 +10,7 @@ import type {
  * 把最近在玩弄丢。presence 每轮 cron 都刷新（心跳），够不到这个 TTL —— 它靠
  * observedAt 判断断流，见 lib/playstation 的 assertPresenceFresh，快照留多久
  * 都不会让页面举着过期的「正在游玩」。
- * Redis 为主、进程内存为辅的行为由 mirrorKey 统一负责。
+ * SQLite 为主、进程内存为辅的行为由 mirrorKey 统一负责。
  */
 export const TTL_MS = 30 * 24 * 60 * 60 * 1000;
 

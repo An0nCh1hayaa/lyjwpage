@@ -16,8 +16,8 @@
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "@/lib/redis-driver": [
-        "./src/redis-driver.ts"
+      "@/lib/storage-driver": [
+        "./src/storage-driver.ts"
       ],
       "@/*": [
         "../../src/*"

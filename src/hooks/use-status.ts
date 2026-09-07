@@ -1,5 +1,7 @@
 "use client";
 
+import { backendUrl } from "@/lib/backend-url";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import useSWR, { useSWRConfig } from "swr";
 
@@ -21,7 +23,7 @@ export function usePageActive() {
 }
 
 async function fetcher<T>(url: string): Promise<StatusResponse<T>> {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(backendUrl(url), { cache: "no-store" });
   if (!response.ok) throw new Error(`请求 ${url} 失败：${response.status}`);
   return response.json();
 }
@@ -104,7 +106,7 @@ export type StatusOptions<T> = {
  * 让「上游挂了」和「网络请求失败」走同一条渲染分支。
  *
  * refreshInterval 由调用方按当前状态给：有播放中/正在充电的东西就调快，
- * 空闲时调慢。真正打到 Redis 的频率由服务端快照缓存决定，前端调快
+ * 空闲时调慢。真正打到 SQLite 的频率由服务端快照缓存决定，前端调快
  * 不会等比传导过去。
  */
 export function useStatus<T>(

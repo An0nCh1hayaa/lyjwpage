@@ -1,4 +1,4 @@
-import { tellRedis } from "@/lib/redis";
+import { tellStorage } from "@/lib/storage";
 import type { PowerBankStatus } from "@/lib/types";
 import { fallback, K_LAST_PUSH, K_LATEST, type Stored } from "@shared/powerbank-store";
 
@@ -6,7 +6,7 @@ import { fallback, K_LAST_PUSH, K_LATEST, type Stored } from "@shared/powerbank-
  * 充电宝最新状态。
  *
  * 和充电头同一条来路：那台 Mac 把 BLE 解出来的遥测 POST 过来，这里落库。机制
- * 照搬 lib/charger-store —— Redis 存最新快照，Redis 不可达时退回进程内存。
+ * 照搬 lib/charger-store —— SQLite 存最新快照，SQLite 不可达时退回进程内存。
  *
  * **不存历史。** 充电头那条功率曲线值得存，因为功率每帧都在跳、形状有信息；
  * 电量以小时为尺度变化，画出来几乎是条水平线，卡片上也就没画。既然没人消费，
@@ -51,16 +51,15 @@ export function prepareStatus(
   return {
     structuralChanged,
     commit: async () => {
+      fallback.persisted = await tellStorage(async (storage) => {
+        const pipe = storage.batch();
+        pipe.set(K_LATEST, JSON.stringify({ status, receivedAt }), { ttlMs: TTL_MS });
+        pipe.set(K_LAST_PUSH, String(receivedAt), { ttlMs: TTL_MS });
+        return pipe.execute();
+      });
       fallback.latest = status;
       fallback.receivedAt = receivedAt;
       fallback.lastPushAt = receivedAt;
-
-      fallback.persisted = await tellRedis(async (redis) => {
-        const pipe = redis.pipeline();
-        pipe.set(K_LATEST, JSON.stringify({ status, receivedAt }), "PX", TTL_MS);
-        pipe.set(K_LAST_PUSH, String(receivedAt), "PX", TTL_MS);
-        return pipe.exec();
-      });
     },
   };
 }

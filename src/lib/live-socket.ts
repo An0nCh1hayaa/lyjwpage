@@ -9,10 +9,10 @@ import { workerUrl } from "@/lib/worker-url";
 
 /** 事件推送：页面开着就一直挂着，Worker 那侧数它作「开着」的页面。 */
 export function liveSocketUrl(): string | null {
-  return workerUrl(process.env.NEXT_PUBLIC_LIVE_PUSH_URL, "/ws", { websocket: true });
+  return workerUrl(process.env.NEXT_PUBLIC_BACKEND_URL, "/ws", { websocket: true });
 }
 
 /** 此刻在线：页面不可见时整条关掉，Worker 那侧数它作「可见」的页面。 */
 export function onlineSocketUrl(): string | null {
-  return workerUrl(process.env.NEXT_PUBLIC_LIVE_PUSH_URL, "/online/ws", { websocket: true });
+  return workerUrl(process.env.NEXT_PUBLIC_BACKEND_URL, "/online/ws", { websocket: true });
 }

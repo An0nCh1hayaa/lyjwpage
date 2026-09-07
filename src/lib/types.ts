@@ -645,7 +645,7 @@ export type VibeCodingYearPayload = {
    * 一次推送」，Mac 停一天，今天那格就跟着少一格，而隔壁 GitHub 那张图照常画到
    * 今天，两张图当场错开一列。
    *
-   * 落进 Redis 的那份没有它（`StoredVibeCodingYear`）：它是「现在几点」的函数，
+   * 落进 SQLite 的那份没有它（`StoredVibeCodingYear`）：它是「现在几点」的函数，
    * 只能在取数出口现盖，见 lib/vibecoding-year 的 withYearFreshness。
    */
   todayAtSource: string;

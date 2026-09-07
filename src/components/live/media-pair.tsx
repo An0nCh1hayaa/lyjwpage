@@ -72,7 +72,7 @@ export function LiveMediaPair({
   powerBankFallback: StatusResponse<PowerBankPayload>;
   listeningFallback: StatusResponse<ListeningPayload>;
   nowListeningFallback: StatusResponse<NowListeningPayload>;
-  /** 首屏同步歌词，由服务端在直读 Redis 缓存后冻进首屏 HTML */
+  /** 首屏同步歌词，由服务端在直读 Storage 缓存后冻进首屏 HTML */
   lyricsFallback?: LyricsFallback | null;
   /** 首屏封面的低清占位表，见 lib/artwork-placeholder；只透传给 ListeningCard */
   artworkPlaceholders: ArtworkPlaceholders;

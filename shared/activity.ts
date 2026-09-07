@@ -1,4 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
+import { mirrorKey } from "@/lib/storage";
 import type { ActivityStatus } from "@/lib/types";
 
 /**

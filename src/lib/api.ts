@@ -1,7 +1,6 @@
-import { connection, NextResponse } from "next/server";
 
 import { AwaitingReport } from "@/lib/awaiting-report";
-import { withRedisScope } from "@/lib/redis";
+import { withStorageScope } from "@/lib/storage";
 import type { StatusResponse } from "@/lib/types";
 
 function reason(error: unknown): string {
@@ -61,7 +60,7 @@ export function titleIdsParam(request: Request): string[] | undefined {
 export async function statusEnvelope<T>(
   loader: () => Promise<T>,
 ): Promise<StatusResponse<T>> {
-  return withRedisScope(async () => {
+  return withStorageScope(async () => {
     try {
       return { ok: true, data: await loader() };
     } catch (error) {
@@ -74,13 +73,13 @@ export async function statusEnvelope<T>(
         // 一句「Cannot read properties of null」根本定位不到是哪一处
         console.error("[status]", error instanceof Error ? (error.stack ?? message) : message);
       }
-      return { ok: false, error: message };
+      return { ok: false, error: error instanceof AwaitingReport ? message : "状态暂不可用" };
     }
   });
 }
 
-function statusJson<T>(envelope: StatusResponse<T>): NextResponse<StatusResponse<T>> {
-  return NextResponse.json(envelope, {
+function statusJson<T>(envelope: StatusResponse<T>): Response {
+  return Response.json(envelope, {
     status: 200,
     /**
      * 时间戳放响应头，不进 body：进了 body 就等于每次响应都不一样，
@@ -93,102 +92,15 @@ function statusJson<T>(envelope: StatusResponse<T>): NextResponse<StatusResponse
   });
 }
 
-/**
- * 状态端点用不用 `'use cache'`，按部署填，默认用。
- *
- * 填 `false` 的那份上，`app/api/status/` 下的状态 GET 一律每次直读 Redis，缓存那层
- * 整个不进（没有例外，加新端点时不用另行登记）。给国内那份准备的：
- * `revalidateTag` 只失效**本实例**那份缓存（Next 默认是每个进程各自的内存
- * LRU，Vercel 另接了一套共享存储，所以在那边看起来是全局的），EdgeOne 跑的是原样的
- * Next（腾讯云 SCF，多实例），于是收到上报的实例失效了自己那份，服务 GET 的实例
- * 不知情，只能等 cacheLife 的 10 分钟兜底 —— 2026-08-16 两边并排量过（当时
- * revalidate 还是 60 秒），EdgeOne 落后 12~45 秒。而那份部署的 Redis 就在同一朵
- * 云上，多打几次不心疼。
- *
- * **只管状态端点。** 首屏那份得冻着才能预渲染（见 next.config.ts 和
- * lib/status-cache），所以关掉之后第一帧仍可能旧到 10 分钟，挂载后 SWR 打这些端点
- * 就是最新的。光配共享的 cacheHandlers 对不齐首屏：EdgeOne 的边缘还按 Next 发的
- * ISR 头另存一份 HTML，见 lib/live-events 的 expireStatus。
- */
-const STATUS_CACHE = process.env.STATUS_CACHE !== "false";
 
-/**
- * 一份状态数据的两种取法。
- *
- * 两条路必须是同一份数据的两种视图 —— 开关一翻，端点发出去的形状不能跟着变，
- * 否则同一张卡在两份部署上会走不同分支。配对写在 lib/status-cache 里，那边本来
- * 就同时拿着 tag 和 loader。
- */
-export type StatusSource<T> = {
-  /** API 专用缓存，和首屏的条目及失效标签分开 */
-  cached: () => Promise<StatusResponse<T>>;
-  /** 关掉缓存时直读 */
-  live: () => Promise<T>;
-};
-
-/** 配一对。走这个壳子而不是写对象字面量，是为了让两半的数据类型对不上时当场报错 */
-export function statusSource<T>(
-  cached: () => Promise<StatusResponse<T>>,
-  live: () => Promise<T>,
-): StatusSource<T> {
-  return { cached, live };
-}
-
-/**
- * 一条状态 GET 的响应。
- *
- * cacheComponents 下没有 force-dynamic 可写了，「每次请求都得跑一遍」只能由
- * connection() 明说。少了它 Next 会试着在构建期把这些 GET 预渲染成静态响应，
- * 而 statusEnvelope 的 try/catch 会把预渲染的中断信号一并吞掉（内置文档专门警告
- * 过这一点），构建期那份 ok:false 就被烤进静态响应，客户端从此永远轮询到同一个
- * 错误。
- *
- * overlay 在取数之外跑：给存活这种心跳更新、以及跟着墙上的钟走的判定（暂停宽限、
- * HomePod 静默、PlayStation presence 断流）现盖一层。取数降级了就把降级信封原样
- * 发出去，不盖。
- *
- * overlay 自己抛出来的也走同一个信封，不往上抛：现算这一层同样可能得出「这份
- * 现在不作数」的结论（断流就是），而那和上游挂了是同一类事，不该变成 500 把
- * 整页 SWR 打成错误态。抛 AwaitingReport 就只记一行，理由见那个类。
- */
-async function statusResponse<T, U>(
-  load: () => Promise<StatusResponse<T>>,
-  overlay?: (data: T) => Promise<U> | U,
-): Promise<NextResponse<StatusResponse<T | U>>> {
-  await connection();
-  return withRedisScope(async () => {
-    const envelope = await load();
-    if (!envelope.ok || !overlay) return statusJson(envelope);
-    return statusJson(await statusEnvelope(async () => overlay(envelope.data)));
-  });
-}
-
-/**
- * 按 STATUS_CACHE 取一份状态：开着读冻起来的那份，关着直读。
- *
- * 状态 GET 之外要读同一份数据的地方也走这里（歌词端点拿它做白名单），别直接
- * 调 `source.cached` —— 那等于在国内那份部署上绕过开关，读到的是最多旧 10 分钟
- * 的快照，而它旁边的 `/api/status/listening/now` 已经在直读 Redis 了。
- */
+export type StatusSource<T> = () => Promise<T>;
 export function readStatus<T>(source: StatusSource<T>): Promise<StatusResponse<T>> {
-  return STATUS_CACHE ? source.cached() : statusEnvelope(source.live);
+  return statusEnvelope(source);
 }
-
-/**
- * `app/api/status/` 下每一条状态 GET 都走这里。取哪一路由 STATUS_CACHE 决定，路由
- * 本身不知道自己冻没冻 —— 知道了就等于每条路由各写一遍开关，漏一条就是那条端点
- * 在国内那份上一直冻着。
- */
-export function statusRoute<T>(
-  source: StatusSource<T>,
-): Promise<NextResponse<StatusResponse<T>>>;
-export function statusRoute<T, U>(
-  source: StatusSource<T>,
-  overlay: (data: T) => Promise<U> | U,
-): Promise<NextResponse<StatusResponse<U>>>;
-export function statusRoute<T, U>(
-  source: StatusSource<T>,
-  overlay?: (data: T) => Promise<U> | U,
-): Promise<NextResponse<StatusResponse<T | U>>> {
-  return statusResponse(() => readStatus(source), overlay);
+export function statusRoute<T>(source: StatusSource<T>): Promise<Response>;
+export function statusRoute<T, U>(source: StatusSource<T>, overlay: (data: T) => Promise<U> | U): Promise<Response>;
+export async function statusRoute<T, U>(source: StatusSource<T>, overlay?: (data: T) => Promise<U> | U): Promise<Response> {
+  const envelope = await readStatus(source);
+  if (!envelope.ok || !overlay) return statusJson(envelope);
+  return statusJson(await statusEnvelope(async () => overlay(envelope.data)));
 }

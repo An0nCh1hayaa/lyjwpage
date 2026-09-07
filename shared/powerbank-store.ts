@@ -1,4 +1,4 @@
-import { key } from "@/lib/redis";
+import { key } from "@/lib/storage";
 import type { PowerBankStatus } from "@/lib/types";
 
 export const K_LATEST = key("powerbank", "latest");

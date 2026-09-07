@@ -38,7 +38,7 @@ export function resolve(item: StoredWatchingItem, objectKeys: Record<string, str
 
 /**
  * 拼装和取数分开：上报那条路上这些东西全在手上（刚规范化好的列表、刚落下的
- * 播放状态），不必等它们写进 Redis 再读回来。条数的默认值只在这里写一遍。
+ * 播放状态），不必等它们写进 SQLite 再读回来。条数的默认值只在这里写一遍。
  */
 export function watchingPayload(
   items: StoredWatchingItem[],

@@ -136,7 +136,7 @@ async function normalizeDesktop(
 
   if (row.iconData != null) throw new Error("desktop.iconData 已停用，请由上报器直传 R2");
 
-  // 上报器一次性编好小图并直传 R2，只把对象键发回来。对象键落 Redis，URL
+  // 上报器一次性编好小图并直传 R2，只把对象键发回来。对象键落 SQLite，URL
   // 到读取/推送时才按当前部署的 R2_PUBLIC_BASE_URL 组，避免写入方烧死交付域名。
   //
   // 站点不在名称上报的热路径里 HEAD：上报器在后台 resolver 里先查后写，
@@ -219,7 +219,7 @@ function upcomingFromMusicRow(row: Record<string, unknown>, title: string | null
  * 现在只有这一条路：每条信封都刷新存活，声明翻转时发一次 presence 事件。
  */
 export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.now()) {
-  // 校验排在任何 I/O 之前：纯计算，不值得为一封写坏的报文先跑一趟 Redis
+  // 校验排在任何 I/O 之前：纯计算，不值得为一封写坏的报文先跑一趟 SQLite
   const envelope = object(input) as TelemetryEnvelope | null;
   if (!envelope || envelope.version !== 4) throw new Error("遥测协议 version 必须为 4");
   if (number(envelope.heartbeatAt) == null) throw new Error("遥测请求缺少 heartbeatAt");
@@ -259,7 +259,7 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
   /**
    * 这封信封用得着的键，**全部在这里一起发车**。
    *
-   * 同一条 ioredis 连接上并发发出的命令在网络上是重叠的，所以这几条加起来
+   * 同一条 HTTP 存储客户端 连接上并发发出的命令在网络上是重叠的，所以这几条加起来
    * 只花一个来回 —— 不用真去组 pipeline。关键是「决定读什么」必须早于
    * 「分发模块」：从前充电头那两条读是分支里现读的，于是它排在状态和存活
    * 后面，一封带充电头的信封要三个背靠背的来回才轮到推送。
@@ -301,14 +301,13 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
    * 这一轮要做的三件事，收集起来一起交给 fanout：写和推同时发车，缓存失效排在
    * 它们之后。先后为什么必须是这样，见 lib/live-events 的 fanout。
    *
-   * 从前是逐个 await：每一次推送前面都压着一串 Redis 往返，而推送本身要的东西
+   * 从前是逐个 await：每一次推送前面都压着一串 SQLite 往返，而推送本身要的东西
    * 这时早就在手上了。
    */
   const writes: Promise<unknown>[] = [];
   const events: PendingEvent[] = [];
   const notify: PendingEvent[] = [];
   const tags: string[] = [];
-  const urgentTags: string[] = [];
 
   let accepted = 0;
   let desktopIconAvailable: boolean | undefined;
@@ -339,7 +338,7 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
   if (presenceFlipped) {
     notify.push({ type: "presence", payload: null });
     tags.push(DESKTOP_TAG);
-    urgentTags.push(NOW_LISTENING_TAG, CHARGER_TAG);
+    tags.push(NOW_LISTENING_TAG, CHARGER_TAG);
   }
 
   /**
@@ -415,7 +414,7 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
               liveness,
             }),
           });
-          urgentTags.push(CHARGER_TAG);
+          tags.push(CHARGER_TAG);
         }
       }
 
@@ -442,7 +441,7 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
             type: "powerbank",
             payload: powerBankPushPayload({ status, receivedAt, liveness }),
           });
-          urgentTags.push(POWERBANK_TAG);
+          tags.push(POWERBANK_TAG);
         }
       }
       accepted += 1;
@@ -503,7 +502,7 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
           upcomingTracks,
         }),
       );
-      urgentTags.push(NOW_LISTENING_TAG);
+      tags.push(NOW_LISTENING_TAG);
     }
 
     if ("appleMusicCredentials" in modules) {
@@ -571,7 +570,7 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
 
     // 整封都收下了才落状态。中途抛出去时这份不写 —— 从前也是这样，
     // persistTelemetryState 就排在所有模块之后。存活不同，见上面。
-    // 只 HSET 这封碰过的字段：心跳和换歌并发时，整包 SET 会把 Redis 里的新歌盖回上一首。
+    // 只 HSET 这封碰过的字段：心跳和换歌并发时，整包 SET 会把 SQLite 里的新歌盖回上一首。
     writes.push(persistTelemetryState(receivedAt, patch, nextActiveModules));
   } finally {
     /**
@@ -585,7 +584,7 @@ export async function recordTelemetryEnvelope(input: unknown, receivedAt = Date.
      * 代价是上报器从离线恢复时，「在线」最迟等下一轮轮询（30 秒）才显示，不再是
      * 收到心跳的那一刻。换来的是推送通道上只跑真正的状态变化。
      */
-    await fanout({ writes, events, notify, tags, urgentTags });
+    await fanout({ writes, events, notify, tags });
   }
 
   return { accepted, heartbeat: true, desktopIconAvailable, chargerCoverIconAvailable };

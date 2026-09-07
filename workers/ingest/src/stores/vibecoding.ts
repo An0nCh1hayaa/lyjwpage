@@ -1,3 +1,4 @@
+import { displayChanged } from "@shared/display-change";
 import { VIBECODING_TAG } from "@/lib/live-events";
 import type {
   VibeCodingNowPayload
@@ -48,12 +49,12 @@ export async function recordAgentLimits(input: unknown, receivedAt = Date.now())
   const parsed = normalizeAgentLimits(input);
   if (!parsed) throw new Error("agents 必须是带 id 的限额行数组，id 不能重复");
   const previous = await limitsMirror.get();
-  const first = previous == null;
+  const next = mergeAgentLimits(previous, parsed, receivedAt);
+  const changed = displayChanged(previous, next);
 
   await fanout({
-    writes: [limitsMirror.put(mergeAgentLimits(previous, parsed, receivedAt))],
-    tags: first ? [] : [VIBECODING_TAG],
-    urgentTags: first ? [VIBECODING_TAG] : [],
+    writes: [limitsMirror.put(next)],
+    tags: changed ? [VIBECODING_TAG] : [],
   });
 
   return { accepted: parsed.agents.length };

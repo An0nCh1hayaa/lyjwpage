@@ -49,7 +49,7 @@ export function withPowerBankFreshness(
 }
 
 /**
- * 推给浏览器的那一份，全部拿手上现成的东西拼，一次 Redis 都不读。
+ * 推给浏览器的那一份，全部拿手上现成的东西拼，一次 SQLite 都不读。
  *
  * 和充电头的 chargerPushPayload 同一个理由：从前这里是 getPowerBankSnapshot()，
  * 它读的正是这次上报刚写下去的那个键 —— 既白等一个来回，又逼得推送只能排在

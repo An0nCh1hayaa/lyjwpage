@@ -8,7 +8,7 @@ const GITHUB_GRAPHQL = "https://api.github.com/graphql";
 /**
  * 缓存这份日历。
  *
- * 其余状态源的 `live` 那半读的都是本地 Redis，只有这条真的出网。
+ * 其余状态源的 `live` 那半读的都是本地 SQLite，只有这条真的出网。
  * STATUS_CACHE 关掉的部署上（见 lib/api）端点走的正是 `live`，于是每一次匿名
  * GET /api/status/github-chart 都等于一次 GitHub GraphQL 调用 —— 端点不鉴权、
  * 响应又是 no-store，CDN 也不兜底，几十 rps 就能把令牌那 5000 points/hour
@@ -104,7 +104,7 @@ function mapDays(payload: CalendarPayload): GithubChartPayload | null {
  * 资料页对上。没配则返回空序列，联系卡片不画这栏；GitHub 挂了要抛出去，
  * 交给 statusEnvelope 变成 ok:false，轮询那轮才不会把上一张好图盖掉。
  *
- * 没配令牌时连缓存都不进：空序列是个常量，为它去问一次 Redis 是白问的。
+ * 没配令牌时连缓存都不进：空序列是个常量，为它去问一次 SQLite 是白问的。
  */
 export async function getGithubChart(): Promise<GithubChartPayload> {
   const token = process.env.GITHUB_TOKEN?.trim();

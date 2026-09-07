@@ -13,9 +13,8 @@ routes = [
 [vars]
 # 和 musickit-token 那份是同一个名单，加域名时两个 worker 都要改、都要重新部署。
 ALLOWED_ORIGINS = "https://lyjw131.com,https://lyjw.me,https://dev.lyjw.me,https://*.vercel.app"
-# 下面这几项要和 Vercel 那份站点的同名环境变量一致：写进 Redis 的键前缀、事件里
-# 拼出来的图片和 Emby 地址，读的那侧（站点）拿的是同一套。
-REDIS_PREFIX = "lyjwpage"
+# 后端统一负责键前缀和公开地址；Vercel 只消费公开快照。
+STORAGE_PREFIX = "lyjwpage"
 R2_PUBLIC_BASE_URL = "https://r2.homepage.lyjw.llc"
 EMBY_PUBLIC_URL = "https://emby.lyjw131.com"
 # 处理完一次上报后回敲这份站点的 /api/revalidate
@@ -23,7 +22,7 @@ SITE_URL = "https://lyjw.me"
 APPLE_MUSIC_STOREFRONT = "cn"
 
 [alias]
-"@/lib/redis-driver" = "./src/redis-driver.ts"
+"@/lib/storage-driver" = "./src/storage-driver.ts"
 
 # 两个房间、两个口径：LIVE_PUSH 数开着的页面（/ws，事件也从它广播），
 # ONLINE_COUNTER 数此刻可见的页面（/online/ws，页脚那个数）。/count 一起回答。
@@ -52,7 +51,15 @@ bucket_name = "lyjw-homepage"
 [observability]
 enabled = true
 
-# 秘密通过 wrangler secret put 配置：REDIS_URL、TELEMETRY_INGEST_SECRET。
-# 有页面连接时刷新最近在听，Redis 闸门将 Apple 请求限制为两分钟一次。
+# 秘密通过 wrangler secret put 配置：GITHUB_TOKEN、TELEMETRY_INGEST_SECRET。
+# 有页面连接时刷新最近在听，SQLite 闸门将 Apple 请求限制为两分钟一次。
 [triggers]
 crons = ["* * * * *"]
+
+[[durable_objects.bindings]]
+name = "STATE"
+class_name = "StateHub"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["StateHub"]

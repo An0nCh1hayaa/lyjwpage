@@ -1,5 +1,5 @@
 import { CHARGER_HISTORY_LIMIT } from "@/lib/limits";
-import { tellRedis, withRedis } from "@/lib/redis";
+import { tellStorage, withStorage } from "@/lib/storage";
 import type { ChargerSample, ChargerStatus } from "@/lib/types";
 import { type ChargerLanding, type ChargerState, DISCONNECTED_HISTORY_AFTER_MS, K_HISTORY, K_LAST_PUSH, K_LATEST, type Stored, disconnectedHistoryExpired, fallback } from "@shared/charger-store";
 
@@ -10,7 +10,7 @@ import { type ChargerLanding, type ChargerState, DISCONNECTED_HISTORY_AFTER_MS, 
  * 间隔以秒计，光靠客户端自己累积的话页面一刷新曲线就没了、还要攒很久
  * 才有形状 —— 所以历史必须存在服务端。
  *
- * 存 Redis：进程重启后历史还在。没配 Redis 就退回进程内存。
+ * 存 SQLite：进程重启后历史还在。没配 SQLite 就退回进程内存。
  */
 
 /**
@@ -138,6 +138,23 @@ export function prepareStatus(
     structuralChanged,
     historyCount,
     commit: async () => {
+      fallback.persisted = await tellStorage(async (storage) => {
+        const pipe = storage.batch();
+        pipe.set(
+          K_LATEST,
+          JSON.stringify({ status, receivedAt, disconnectedAt: disconnectedAt || null }),
+          { ttlMs: TTL_MS },
+        );
+        pipe.set(K_LAST_PUSH, String(receivedAt), { ttlMs: TTL_MS });
+        if (plan.kind === "clear" || (plan.kind === "append" && plan.reset)) pipe.remove(K_HISTORY);
+        if (plan.kind === "append") {
+          pipe.append(K_HISTORY, JSON.stringify(plan.sample));
+          // 只留最近 CHARGER_HISTORY_LIMIT 条，用 SQLite 自己的裁剪，不用把整条读回来重写
+          pipe.trim(K_HISTORY, -CHARGER_HISTORY_LIMIT, -1);
+          pipe.expire(K_HISTORY, TTL_MS);
+        }
+        return pipe.execute();
+      });
       fallback.latest = status;
       fallback.receivedAt = receivedAt;
       fallback.disconnectedAt = disconnectedAt;
@@ -149,25 +166,6 @@ export function prepareStatus(
           fallback.history.splice(0, fallback.history.length - CHARGER_HISTORY_LIMIT);
         }
       }
-
-      fallback.persisted = await tellRedis(async (redis) => {
-        const pipe = redis.pipeline();
-        pipe.set(
-          K_LATEST,
-          JSON.stringify({ status, receivedAt, disconnectedAt: disconnectedAt || null }),
-          "PX",
-          TTL_MS,
-        );
-        pipe.set(K_LAST_PUSH, String(receivedAt), "PX", TTL_MS);
-        if (plan.kind === "clear" || (plan.kind === "append" && plan.reset)) pipe.del(K_HISTORY);
-        if (plan.kind === "append") {
-          pipe.rpush(K_HISTORY, JSON.stringify(plan.sample));
-          // 只留最近 CHARGER_HISTORY_LIMIT 条，用 Redis 自己的裁剪，不用把整条读回来重写
-          pipe.ltrim(K_HISTORY, -CHARGER_HISTORY_LIMIT, -1);
-          pipe.pexpire(K_HISTORY, TTL_MS);
-        }
-        return pipe.exec();
-      });
     },
   };
 }
@@ -192,13 +190,13 @@ export function prepareHeartbeat(
     commit: async () => {
       fallback.lastPushAt = receivedAt;
       if (expired) fallback.history.length = 0;
-      // 不走 tellRedis：`persisted` 说的是「快照那份落进去了没有」，
+      // 不走 tellStorage：`persisted` 说的是「快照那份落进去了没有」，
       // 这里写的是心跳时刻，不该由它来翻那个标志
-      await withRedis(async (redis) => {
-        const pipe = redis.pipeline();
-        pipe.set(K_LAST_PUSH, String(receivedAt), "PX", TTL_MS);
-        if (expired) pipe.del(K_HISTORY);
-        return pipe.exec();
+      await withStorage(async (storage) => {
+        const pipe = storage.batch();
+        pipe.set(K_LAST_PUSH, String(receivedAt), { ttlMs: TTL_MS });
+        if (expired) pipe.remove(K_HISTORY);
+        return pipe.execute();
       }, null);
     },
   };

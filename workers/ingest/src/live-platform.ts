@@ -14,14 +14,13 @@ export function afterResponse(work: () => Promise<void>): Promise<void> {
 const REVALIDATE_TIMEOUT_MS = 5_000;
 
 /**
- * 一次上报一次 POST，普通和 urgent 一起带过去。失败只记日志：数据已经在 Redis 里，
+ * 一次上报一次 POST，普通和 urgent 一起带过去。失败只记日志：数据已经在 SQLite 里，
  * 缓存最多旧到 cacheLife 兜底的 10 分钟，为此让上报器重发同一份没有意义。
  */
 export async function expireStatusTags(
   tags: readonly string[],
-  urgentTags: readonly string[],
 ): Promise<void> {
-  if (!tags.length && !urgentTags.length) return;
+  if (!tags.length) return;
   const { env } = currentContext();
   const site = env.SITE_URL?.replace(/\/+$/, "");
   const secret = env.TELEMETRY_INGEST_SECRET;
@@ -37,7 +36,7 @@ export async function expireStatusTags(
         authorization: `Bearer ${secret}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ tags, urgentTags }),
+      body: JSON.stringify({ tags }),
       signal: AbortSignal.timeout(REVALIDATE_TIMEOUT_MS),
     });
     if (!response.ok) {

@@ -1,4 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
+import { mirrorKey } from "@/lib/storage";
 import {
   type StoredAgentLimits
 } from "@/lib/vibecoding-limits";
@@ -20,7 +20,7 @@ import {
  * 从前 usage 和 limits 是一份，再往前是三份（按「哪条命令产出的」划）。现在这道
  * 线是按来源划的：两台机器各报各的，站点按 id 拼成一行。
  *
- * Redis 为主、进程内存为辅，规则见 lib/redis 的 mirrorKey。
+ * SQLite 为主、进程内存为辅，规则见 lib/storage 的 mirrorKey。
  */
 export const usageMirror = mirrorKey<{ payload: StoredUsage; pushedAt: number }>(
   ["vibecoding", "usage"],

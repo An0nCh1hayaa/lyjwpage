@@ -13,7 +13,7 @@ import { desktopPayload, snapshotFrom, syncTelemetryState, telemetryState } from
 /**
  * 取数路径上先把状态和存活各读一次。
  *
- * 存活是另一个 Redis key，两者都要，所以一起读 —— 各自 await 一次的话同一个
+ * 存活是另一个 SQLite key，两者都要，所以一起读 —— 各自 await 一次的话同一个
  * 请求里会多一趟往返。「上报器整体是否已超过心跳窗口」只影响 Mac 来的东西，
  * HomePod 走自己的路径。
  */

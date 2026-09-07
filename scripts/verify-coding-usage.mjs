@@ -1,21 +1,19 @@
 #!/usr/bin/env node
-/** Local, isolated end-to-end verification. Never reads .env or ambient Redis credentials. */
+/** Local, isolated end-to-end verification. Never reads .env or ambient production credentials. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import Redis from "ioredis";
 
 const { values } = parseArgs({ options: {
   ingest: { type: "string", default: "http://127.0.0.1:8787" },
   base: { type: "string", default: "http://localhost:3211" },
-  "redis-url": { type: "string", default: "redis://127.0.0.1:6389" },
-  "redis-prefix": { type: "string" },
+  "storage-prefix": { type: "string" },
   snapshot: { type: "string" },
   help: { type: "boolean" },
 } });
 if (values.help) {
-  console.log("node scripts/verify-coding-usage.mjs --redis-prefix <isolated-dev-prefix> [--snapshot <Mac CLI JSON>] [--base http://localhost:3211] [--ingest http://127.0.0.1:8787] [--redis-url redis://127.0.0.1:6389]");
-  console.log("Requires dedicated local Next and Worker servers with the same isolated Redis, and TELEMETRY_INGEST_SECRET=local-token-usage-verification; production services must not be configured. Leaves the input snapshot (or synthetic baseline) installed and restores prior limits.");
+  console.log("node scripts/verify-coding-usage.mjs --storage-prefix <isolated-dev-prefix> [--snapshot <Mac CLI JSON>] [--base http://localhost:3211] [--ingest http://127.0.0.1:8787]");
+  console.log("Requires dedicated local Next and Worker servers with the same empty isolated Durable Object, and TELEMETRY_INGEST_SECRET=local-token-usage-verification; production services must not be configured. Leaves the input snapshot (or synthetic baseline) installed and synthetic limits.");
   process.exit(0);
 }
 
@@ -31,11 +29,9 @@ const base = localURL(values.base, "http:");
 assert.equal(base.pathname, "/", "The HTTP target must be an origin");
 const ingest = localURL(values.ingest, "http:");
 assert.equal(ingest.pathname, "/");
-const redisURL = localURL(values["redis-url"], "redis:");
-assert.ok(redisURL.port && redisURL.port !== "6379", "Use an explicit, dedicated Redis port other than 6379");
-const prefix = values["redis-prefix"];
-assert.ok(prefix && /^[a-zA-Z0-9:_-]+$/.test(prefix) && /(?:^|[-_:])(test|dev|verify)(?:[-_:]|$)/.test(prefix), "Supply an explicit test/dev/verify Redis prefix; production prefixes are forbidden");
-const redisKeys = ["usage", "now", "year", "limits"].map((part) => `${prefix}:vibecoding:${part}`);
+const prefix = values["storage-prefix"];
+assert.ok(prefix && /^[a-zA-Z0-9:_-]+$/.test(prefix) && /(?:^|[-_:])(test|dev|verify)(?:[-_:]|$)/.test(prefix), "Supply an explicit test/dev/verify storage prefix; production prefixes are forbidden");
+
 const secret = "local-token-usage-verification";
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const date = (stamp) => new Date(stamp).toISOString().slice(0, 10);
@@ -81,7 +77,7 @@ function envelope(snapshot, parts = ["usage", "now", "year"]) {
   return { version: 4, heartbeatAt: Date.now(), presence: "online", activeModules: ["vibeCoding"], modules: Object.fromEntries(parts.map((part) => [names[part], snapshot[part]])) };
 }
 async function request(path, body, authorization = secret) {
-  const response = await fetch(new URL(path, path.startsWith("/api/ingest/") ? ingest : base), {
+  const response = await fetch(new URL(path, ingest), {
     method: body === undefined ? "GET" : "POST",
     headers: { "content-type": "application/json", ...(authorization ? { authorization: `Bearer ${authorization}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -133,17 +129,12 @@ async function assertSnapshot(snapshot) {
 
 let passed = 0;
 function pass(label) { console.log(`PASS ${++passed}: ${label}`); }
-const redis = new Redis(redisURL.href, { lazyConnect: true, retryStrategy: null, maxRetriesPerRequest: 0, connectTimeout: 2_000 });
-let previous;
 let mutated = false;
 try {
   await post("/api/ingest/mac", envelope(baseline), 401, null);
   await post("/api/ingest/agents", limits, 401, "wrong-verification-secret");
   pass("Both ingest endpoints enforce authentication");
-  await redis.connect();
-  previous = await redis.mget(...redisKeys);
-  // Only four known coding keys in the explicit isolated prefix. Never FLUSHDB or SCAN.
-  await redis.del(...redisKeys);
+  assert.equal((await request("/api/status/vibecoding")).body.ok, false, "Use a fresh isolated Worker; existing coding data must not be overwritten");
   mutated = true;
   await post("/api/ingest/agents", limits);
   await eventually(async () => {
@@ -155,7 +146,6 @@ try {
     assert.ok(usage.agents.every(({ today, usageStatus }) => today === null && usageStatus.state === "unavailable"));
     assert.equal(usage.agents.find(({ id }) => id === "claude").limits[0].usedPercent, 20);
   }, "limits-only state");
-  assert.ok(await redis.get(redisKeys[3]), "Dev server and script must use the same isolated Redis prefix");
   pass("Limits-only sources render data with unknown totals and today, not zero");
 
   const old = structuredClone(baseline);
@@ -200,10 +190,8 @@ try {
   const invalidYear = structuredClone(baseline);
   invalidYear.usage.totals.totalTokens = 999_999;
   invalidYear.year.days.pop();
-  const saved = await redis.mget(...redisKeys.slice(0, 3));
   await post("/api/ingest/mac", envelope(invalidYear), 400);
   await sleep(300);
-  assert.deepEqual(await redis.mget(...redisKeys.slice(0, 3)), saved, "An invalid later module must not partially write earlier coding modules");
   await assertSnapshot(nowOnly);
   pass("An invalid later year module rejects the entire coding snapshot before writes");
 
@@ -224,32 +212,10 @@ try {
   assert.equal(refreshed.days.length, 371);
   pass("Historical corrections can decrease a day and add an old active day through cached status routes");
 } finally {
-  try {
-    if (mutated) {
-      // Restore previous state first so a failed input upload also leaves recoverable data.
-      await redis.del(...redisKeys);
-      for (let index = 0; index < redisKeys.length; index += 1) {
-        if (previous[index] !== null) await redis.set(redisKeys[index], previous[index]);
-      }
-      await post("/api/ingest/mac", envelope(restore));
-      await assertSnapshot(restore);
-      const originalLimits = previous[3] === null ? {} : JSON.parse(previous[3]).agents;
-      await eventually(async () => {
-        assert.equal(await redis.get(redisKeys[3]), previous[3], "Restore the exact original limits state");
-        const usage = await data("/api/status/vibecoding");
-        assert.deepEqual(usage.agents.map(({ id }) => id).sort(), [...new Set([...restore.usage.agents.map(({ id }) => id), ...Object.keys(originalLimits)])].sort());
-        for (const row of usage.agents) {
-          const expected = originalLimits[row.id];
-          assert.equal(row.limitsAt, expected?.pushedAt ?? null);
-          assert.deepEqual(row.limits, expected?.limits ?? []);
-          assert.deepEqual(row.plan, expected?.plan ?? null);
-          assert.equal(row.limitsError, expected?.limitsError ?? null);
-        }
-      }, "restored limits through cached status route");
-      console.log(`RESTORED ${values.snapshot ?? "synthetic baseline"}: ${restore.usage.totals.totalTokens} tokens, ${restore.usage.totals.activeDays} active days, ${restore.year.days.length} year days`);
-    }
-  } finally {
-    redis.disconnect();
+  if (mutated) {
+    await post("/api/ingest/mac", envelope(restore));
+    await assertSnapshot(restore);
+    console.log(`RESTORED ${values.snapshot ?? "synthetic baseline"}; the isolated test state remains available for inspection`);
   }
 }
-console.log(`All ${passed} end-to-end checks passed at ${base.origin}, Redis prefix ${prefix}.`);
+console.log(`All ${passed} end-to-end checks passed at ${base.origin}, storage prefix ${prefix}.`);

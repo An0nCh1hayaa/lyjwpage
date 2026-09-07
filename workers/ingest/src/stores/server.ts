@@ -1,3 +1,4 @@
+import { displayChanged } from "@shared/display-change";
 import { SERVER_TAG } from "@/lib/live-events";
 import { normalizeServer } from "@/lib/server-parse";
 import { fanout } from "@ingest/fanout";
@@ -14,12 +15,11 @@ import { mirror } from "@shared/server";
 export async function recordServerReport(input: unknown, receivedAt = Date.now()) {
   const status = normalizeServer(input);
   const previous = await mirror.get();
-  const first = previous == null;
+  const changed = displayChanged(previous?.status, status);
 
   await fanout({
     writes: [mirror.put({ status, receivedAt })],
-    tags: first ? [] : [SERVER_TAG],
-    urgentTags: first ? [SERVER_TAG] : [],
+    tags: changed ? [SERVER_TAG] : [],
   });
 
   return { id: status.id };

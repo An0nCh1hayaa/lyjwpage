@@ -34,7 +34,7 @@ const LYRICS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * 「没有歌词」只缓存一小时。
  *
  * 404 有两种含义：这首歌确实没有同步歌词，或者 Media-User-Token 那一刻不在
- * （Redis 抖一下、上报器重新授权中）。两者在响应上分不开，按一周缓存的话后一种
+ * （SQLite 抖一下、上报器重新授权中）。两者在响应上分不开，按一周缓存的话后一种
  * 会把一首明明有词的歌锁死一星期。目录查询那侧的 `hasLyrics` 已经把「确实没有」
  * 的大头挡在了请求之前（见 lib/apple-music 和 hooks/use-lyrics），走到这里的
  * 404 更可能是后者，所以留短。
@@ -96,8 +96,8 @@ async function loadLyrics(songId: string): Promise<LyricsResult> {
   if (!credentials.ok) {
     // 没有订阅身份就别去问：问了也是那个分不清的 404，还会把它缓存成「没有」
     throw new AppleUpstreamError(
-      credentials.reason === "redis-unreachable"
-        ? "读不到 Apple Music 凭据 —— Redis 连不上"
+      credentials.reason === "storage-unreachable"
+        ? "读不到 Apple Music 凭据 —— Storage 连不上"
         : "没有 Mac 上报器推来的 Apple Music 凭据",
     );
   }

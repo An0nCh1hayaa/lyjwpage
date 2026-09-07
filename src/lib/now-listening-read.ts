@@ -1,7 +1,7 @@
 import { readStatus } from "@/lib/api";
 import { pickNowListening } from "@/lib/now-listening";
 import { readLiveness } from "@/lib/reporter-liveness";
-import { listeningStatus, nowListeningStatus } from "@/lib/status-cache";
+import { listeningStatus, nowListeningStatus } from "@/lib/status-sources";
 import type { ListeningPayload, NowListeningPayload } from "@/lib/types";
 
 /**

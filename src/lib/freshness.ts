@@ -69,7 +69,7 @@ export function agentLimitsStaleMs() {
  * 15 分钟那档决定。
  *
  * 45 分钟之外还要再宽一截给缓存：端点读的是 'use cache' 那份快照，心跳只推
- * 普通 tag（stale-while-revalidate），拿到手的 observedAt 可能比 Redis 里那份
+ * 普通 tag（stale-while-revalidate），拿到手的 observedAt 可能比 SQLite 里那份
  * 旧一个刷新周期。3 × 15 = 45，留到 50。上报器那侧改**闲时**那档间隔
  * （`IDLE_TICK_INTERVAL_MS`）时这里要跟着改，改 cron 本身不用动这里。
  *
@@ -122,7 +122,7 @@ export function serverStaleMs() {
  * 供首帧用，浏览器挂载后拿自己的钟再算一次。两处必须是同一段代码 —— 各写一遍
  * 的话，跨夜那一下两边会各给各的答案。
  *
- * 也放在这里而不是 lib/activity：那个文件连着 Redis，客户端组件 import 不得。
+ * 也放在这里而不是 lib/activity：那个文件连着 SQLite，客户端组件 import 不得。
  */
 export function localDate(at: number, secondsFromGMT: number): string {
   return new Date(at + secondsFromGMT * 1000).toISOString().slice(0, 10);

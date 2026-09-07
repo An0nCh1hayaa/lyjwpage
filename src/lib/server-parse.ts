@@ -1,7 +1,7 @@
 /**
  * 服务器上报报文的类型收敛。
  *
- * 这份文件不碰 Redis：校验是纯函数，测试和入库走同一条。
+ * 这份文件不碰 SQLite：校验是纯函数，测试和入库走同一条。
  */
 
 import { number, object, text } from "./json.ts";

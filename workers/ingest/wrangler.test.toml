@@ -1,0 +1,39 @@
+# 小号 Vercel 专用，命名空间与生产完全独立；没有生产域名或 cron。
+name = "ingest-do-test"
+main = "src/index.ts"
+compatibility_date = "2025-02-14"
+compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
+workers_dev = true
+
+[vars]
+STORAGE_PREFIX = "lyjwpage-test"
+ALLOWED_ORIGINS = "https://*.vercel.app"
+SITE_URL = "https://lyjwpage-do-test.vercel.app"
+APPLE_MUSIC_STOREFRONT = "cn"
+R2_PUBLIC_BASE_URL = "https://r2.homepage.lyjw.llc"
+EMBY_PUBLIC_URL = "https://emby.lyjw131.com"
+
+[alias]
+"@/lib/storage-driver" = "./src/storage-driver.ts"
+
+[[durable_objects.bindings]]
+name = "LIVE_PUSH"
+class_name = "LivePushRoom"
+[[durable_objects.bindings]]
+name = "ONLINE_COUNTER"
+class_name = "OnlineCounterRoom"
+[[durable_objects.bindings]]
+name = "STATE"
+class_name = "StateHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LivePushRoom", "OnlineCounterRoom", "StateHub"]
+
+# 只有 HEAD 读取；测试上报使用模拟数据，不上传或修改生产图片。
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "lyjw-homepage"
+
+[observability]
+enabled = true

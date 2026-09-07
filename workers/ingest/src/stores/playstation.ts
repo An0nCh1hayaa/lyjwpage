@@ -71,7 +71,6 @@ export async function recordPlaystationReport(input: unknown) {
   const events: PendingEvent[] = [];
   const tags: string[] = [];
 
-  const urgentTags: string[] = [];
   if (incomingPresence) {
     /**
      * 内容没变也要落库：presence 是心跳（Worker 每轮 cron 都发一封），
@@ -80,31 +79,29 @@ export async function recordPlaystationReport(input: unknown) {
      *
      * 但没变就不广播 —— 推一条一模一样的事件是拿推送当轮询用。tag 仍然要推，
      * 走普通那半：不推的话 'use cache' 里那份快照的 observedAt 跟着冻住，心跳
-     * 刷新的只有 Redis，端点读到的还是老时刻。普通 tag 给的是
+     * 刷新的只有 SQLite，端点读到的还是老时刻。普通 tag 给的是
      * stale-while-revalidate，落后一个刷新周期，窗口已经把这一截算进去了。
      */
     writes.push(setPlaystationPresence(incomingPresence));
     if (presenceChanged || !previousPresence) {
       events.push({ type: "playing-now", payload: incomingPresence });
       // 「正在游玩」和听歌 now 一样：不能先把旧值再顶几分钟。
-      urgentTags.push(NOW_PLAYING_TAG);
-    } else {
       tags.push(NOW_PLAYING_TAG);
     }
   }
   if (incomingPlayedGames && (playedGamesChanged || !previousPlayedGames)) {
     writes.push(setPlaystationPlayedGames(incomingPlayedGames));
     events.push({ type: "playing", payload: incomingPlayedGames });
-    urgentTags.push(PLAYING_TAG);
+    tags.push(PLAYING_TAG);
     // 奖杯目录的时长和 Plus / 预购是读时按 titleIds 盖上去的，游玩一变就得重算。
     tags.push(TROPHIES_TAG);
   }
   if (incomingTrophies && (trophiesChanged || !previousTrophies)) {
     writes.push(setPlaystationTrophies(incomingTrophies));
     // 目录是整份替换：旧标题必须立刻从 status 里消失，不能再 SWR 几分钟。
-    urgentTags.push(TROPHIES_TAG);
+    tags.push(TROPHIES_TAG);
   }
 
-  await fanout({ writes, events, tags, urgentTags });
+  await fanout({ writes, events, tags });
   return { changed: presenceChanged || playedGamesChanged || trophiesChanged };
 }

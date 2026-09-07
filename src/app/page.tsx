@@ -13,74 +13,11 @@ import { Section } from "@/components/ui/section";
 import { artworkPlaceholders } from "@/lib/artwork-placeholder";
 import { desktopIconDataUri } from "@/lib/desktop-icon-inline";
 import { githubAvatarDataUri } from "@/lib/github-avatar-icon";
-import {
-  cachedActivity,
-  cachedServer,
-  cachedCharger,
-  cachedPowerBank,
-  cachedDesktop,
-  cachedGithubChart,
-  cachedListening,
-  cachedLyrics,
-  cachedNowListening,
-  cachedNowWatching,
-  cachedPlaying,
-  cachedPlayingNow,
-  cachedTrophiesSummary,
-  cachedTimezone,
-  cachedVibeCoding,
-  cachedVibeCodingYear,
-  cachedWatching,
-} from "@/lib/status-cache";
+import { cachedHomeSnapshot } from "@/lib/status-cache";
 
 export default async function Home() {
-  /**
-   * 服务端并行读首屏数据。状态卡片使用 fallbackData；时区没有
-   * status 轮询端点，在服务端预渲染时直接烧进静态 HTML。热力图也烧进去，
-   * 客户端不在进页时回源，只按很长的间隔打热力图接口。
-   *
-   * 每份都是缓存过的（见 lib/status-cache）：整页因此能预渲染成静态壳，
-   * 上报只把 page 标签标成 stale，访客先拿旧 HTML，取数重建留在后台。
-   * 一份读失败只让那张卡拿到 ok:false，信封不会 reject，Promise.all 不会被拖垮。
-   */
-  const [
-    desktop,
-    activity,
-    server,
-    charger,
-    powerBank,
-    listening,
-    nowListening,
-    timezone,
-    vibeCoding,
-    vibeCodingYear,
-    watching,
-    nowWatching,
-    playing,
-    playingNow,
-    trophies,
-    githubChart,
-    avatarDataUri,
-  ] = await Promise.all([
-    cachedDesktop("page"),
-    cachedActivity("page"),
-    cachedServer("page"),
-    cachedCharger(),
-    cachedPowerBank(),
-    cachedListening("page"),
-    cachedNowListening(),
-    cachedTimezone(),
-    cachedVibeCoding("page"),
-    cachedVibeCodingYear("page"),
-    cachedWatching("page"),
-    cachedNowWatching(),
-    cachedPlaying("page"),
-    cachedPlayingNow("page"),
-    cachedTrophiesSummary(),
-    cachedGithubChart(),
-    // 不是状态数据，是构建期就定死的那张头像 —— 一起 await 免得多排一轮
-    githubAvatarDataUri(),
-  ]);
+  const [snapshot, avatarDataUri] = await Promise.all([cachedHomeSnapshot(), githubAvatarDataUri()]);
+  const { desktop, activity, server, charger, powerBank, listening, nowListening, timezone, vibeCoding, vibeCodingYear, watching, nowWatching, playing, playingNow, trophies, githubChart, lyrics } = snapshot;
 
   const nowSongId =
     nowListening.ok && !nowListening.data.idle && nowListening.data.hasLyrics
@@ -93,13 +30,12 @@ export default async function Home() {
    * 模板 URL 缓存（lib/artwork-placeholder）、歌词按 songId 缓存（lib/status-cache 的 cachedLyrics），
    * 命中后这里都不产生额外往返；三者彼此无关，未命中时并行把最坏等待压到单边的超时。
    */
-  const [desktopIcon, artwork, lyrics] = await Promise.all([
+  const [desktopIcon, artwork] = await Promise.all([
     desktopIconDataUri(desktop.ok ? (desktop.data.desktop?.iconUrl ?? null) : null),
     artworkPlaceholders(
       listening.ok ? listening.data.items.map((item) => item.artwork) : [],
       nowListening.ok ? (nowListening.data.music?.artworkUrl ?? null) : null,
     ),
-    nowSongId ? cachedLyrics(nowSongId) : null,
   ]);
 
   return (

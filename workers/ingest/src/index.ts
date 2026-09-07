@@ -1,13 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { withRedisScope } from "@/lib/redis";
-import { recordHomePodEvent } from "./homepod-ingest";
-import { recordPhoneEnvelope } from "./phone-telemetry";
-import { recordEmbyReport } from "./stores/emby";
-import { recordPlaystationReport } from "./stores/playstation";
-import { recordServerReport } from "./stores/server";
-import { recordTelemetryEnvelope } from "./stores/telemetry";
-import { recordAgentLimits } from "./stores/vibecoding";
+import { HANDLERS } from "./ingest-handlers";
+import { StateHub } from "./state-hub";
+import { STORAGE_MAX_BYTES } from "@shared/storage-contract";
+import type { StoredEntry } from "@shared/sqlite-store";
 
 import { refreshRecentlyPlayed } from "./apple-music-recent";
 
@@ -15,27 +11,16 @@ import { ROOM_ID } from "./live-platform";
 import { OnlineCounterRoom } from "./online-counter";
 import { requestStore, type Env } from "./runtime";
 
-/** 接收所有上报，在 Worker 内写 Redis、广播 WebSocket，再通知 Vercel 缓存失效。 */
+/** 接收所有上报，在 Worker 内写 Storage、广播 WebSocket，再通知 Vercel 缓存失效。 */
 
 export type { Env };
 // Durable Object 类必须从入口模块导出，wrangler 按名字找
-export { OnlineCounterRoom };
+export { OnlineCounterRoom, StateHub };
 
 const WS_PATH = "/ws";
 /** 「此刻在线」的连接。和 /ws 是两个房间、两个口径，见 online-counter.ts */
 const ONLINE_WS_PATH = "/online/ws";
 const INGEST_PREFIX = "/api/ingest/";
-
-/** 来源名称是对外契约，处理器只存在于此 Worker。 */
-const HANDLERS: Record<string, (body: unknown) => Promise<unknown>> = {
-  mac: recordTelemetryEnvelope,
-  iphone: recordPhoneEnvelope,
-  homepod: recordHomePodEvent,
-  emby: recordEmbyReport,
-  playstation: recordPlaystationReport,
-  server: recordServerReport,
-  agents: recordAgentLimits,
-};
 
 const LOCAL_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 
@@ -196,8 +181,8 @@ async function handleIngest(
   if (!provided || !secretMatches(provided, expected)) {
     return jsonResponse({ ok: false, error: "未授权" }, { status: 401 });
   }
-  if (!env.REDIS_URL) {
-    return jsonResponse({ ok: false, error: "Worker 未配置 REDIS_URL" }, { status: 503 });
+  if (!env.STATE) {
+    return jsonResponse({ ok: false, error: "Worker 未配置 STATE" }, { status: 503 });
   }
 
   const handler = Object.hasOwn(HANDLERS, source) ? HANDLERS[source] : undefined;
@@ -205,25 +190,65 @@ async function handleIngest(
 
   let raw: string;
   try {
-    raw = await request.text();
+    raw = await readBoundedBody(request);
   } catch (error) {
     console.error("[ingest] 读取请求体失败", source, reason(error));
     return jsonResponse({ ok: false, error: "无法读取上报数据" }, { status: 400 });
   }
 
-  return requestStore.run({ env, ctx }, () => {
-    return withRedisScope(async () => {
-      try {
-        const data = await handler(parseBody(raw));
-        return jsonResponse({ ok: true, data }, { status: 202 });
-      } catch (error) {
-        // 处理器也会调用 Redis / R2；异常消息可能带内部地址、路径和调用细节。
-        // 只在服务端记录原因，公开响应不拼接任何异常内容。
-        console.error("[ingest]", source, reason(error));
-        return jsonResponse({ ok: false, error: "上报数据无效或处理失败" }, { status: 400 });
-      }
-    });
-  });
+  try {
+    const body = parseBody(raw);
+    const hub = env.STATE.get(env.STATE.idFromName("global"));
+    const result = await hub.ingest(source, body);
+    if (!result.ready) return jsonResponse({ ok: false, error: "状态存储初始化中" }, { status: 503 });
+    return jsonResponse({ ok: true, data: JSON.parse(result.json) }, { status: 202 });
+  } catch (error) {
+    console.error("[ingest]", source, reason(error));
+    return jsonResponse({ ok: false, error: "上报数据无效或处理失败" }, { status: 400 });
+  }
+}
+
+/** 限制实际读取字节数，不依赖可能缺失或伪造的 Content-Length。 */
+async function readBoundedBody(request: Request): Promise<string> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let result = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > STORAGE_MAX_BYTES) { await reader.cancel(); throw new Error("Body too large"); }
+      result += decoder.decode(value, { stream: true });
+    }
+    return result + decoder.decode();
+  } finally { reader.releaseLock(); }
+}
+
+async function handleImport(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") return jsonResponse({ ok: false }, { status: 405 });
+  const expected = env.STATE_IMPORT_SECRET;
+  if (!expected || !env.STATE) return jsonResponse({ ok: false }, { status: 503 });
+  const provided = bearerToken(request);
+  if (!provided || !secretMatches(provided, expected)) return jsonResponse({ ok: false }, { status: 401 });
+  try {
+    const body = JSON.parse(await readBoundedBody(request));
+    const hub = env.STATE.get(env.STATE.idFromName("global"));
+    const prefix = env.STORAGE_PREFIX ?? "lyjwpage";
+    {
+      if (!Array.isArray(body.entries) || body.entries.length > 1000 || !body.entries.every((entry: StoredEntry) =>
+        entry && typeof entry.key === "string" && entry.key.startsWith(`${prefix}:`) &&
+        (entry.expiresAt === null || Number.isSafeInteger(entry.expiresAt)))) throw new Error("Invalid import");
+      const imported = await hub.importMissing(body.entries);
+      if (body.finalize === true) await hub.finishImport();
+      return jsonResponse({ imported });
+    }
+  } catch (error) {
+    console.error("[storage]", reason(error));
+    return jsonResponse({ ok: false, error: "存储请求失败" }, { status: 400 });
+  }
 }
 
 const CONNECTION_STALE_MS = 5 * 60_000;
@@ -312,11 +337,13 @@ export class LivePushRoom extends DurableObject<Env> {
 
 const worker = {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (!env.REDIS_URL || !(await getRoom(env).connectionCount())) return;
+    if (!env.STATE || !(await getRoom(env).connectionCount())) return;
     await requestStore.run({ env, ctx }, () => refreshRecentlyPlayed());
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/internal/storage/import") return handleImport(request, env);
 
     if (url.pathname.startsWith(INGEST_PREFIX)) {
       return handleIngest(request, env, ctx, url.pathname.slice(INGEST_PREFIX.length));
@@ -330,11 +357,22 @@ const worker = {
       return new Response(null, { status: 204, headers: cors });
     }
 
+    if (url.pathname.startsWith("/api/")) {
+      if (request.method !== "GET") return new Response("Method not allowed", { status: 405, headers: cors });
+      const origin = request.headers.get("Origin");
+      if (origin && !isAllowedOriginValue(origin, getAllowedOrigins(env))) return jsonResponse({ ok: false }, { status: 403, headers: cors });
+      const response = await env.STATE.get(env.STATE.idFromName("global")).fetch(request);
+      const headers = new Headers(response.headers);
+      cors.forEach((value, name) => headers.set(name, value));
+      headers.set("Access-Control-Expose-Headers", "X-Fetched-At");
+      return new Response(response.body, { status: response.status, headers });
+    }
+
     if (url.pathname === WS_PATH) {
       const rejected = rejectSocket(request, env);
       if (rejected) return rejected;
       const response = await getRoom(env).fetch(request);
-      if (response.status === 101 && env.REDIS_URL) {
+      if (response.status === 101 && env.STATE) {
         await requestStore.run({ env, ctx }, () => refreshRecentlyPlayed());
       }
       return response;
@@ -342,7 +380,7 @@ const worker = {
 
     if (url.pathname === ONLINE_WS_PATH) {
       // 不走上面那条的最近在听刷新：这条连接按可见性反复重连，每切一次标签页就
-      // 敲一次 Redis 闸门不值得；开着页面的那条 /ws 已经把刷新带起来了
+      // 敲一次 SQLite 闸门不值得；开着页面的那条 /ws 已经把刷新带起来了
       const rejected = rejectSocket(request, env);
       if (rejected) return rejected;
       return getOnlineRoom(env).fetch(request);

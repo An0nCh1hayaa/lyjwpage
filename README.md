@@ -30,108 +30,36 @@ pnpm dev
 
 开发服务器固定使用 `http://localhost:3211`，避开已占用的 3210。
 
-## 部署在哪
+## 海外部署与数据链路
 
-同一个仓库三份部署。两份生产与 ingest Worker 共用 Redis 和键前缀；预览环境独立：
+Workers 是唯一数据后端：接收上报、持久化 Durable Objects SQLite、提供状态 API、获取并缓存外部数据，以及 WebSocket 和在线人数。Vercel 负责首屏 HTML、Next.js 页面缓存、静态资源和图片处理。
 
-| 域名 | 平台 | 环境 | 说明 |
-| --- | --- | --- | --- |
-| `lyjw.me` | Vercel | 生产 | 主站 |
-| `lyjw131.com` | EdgeOne | 生产 | 国内 CDN |
-| `dev.lyjw.me` | Vercel | 预览 | 跟 `dev` 分支，开着 Vercel Authentication |
-
-分不清哪个是哪个时看响应头：Vercel 是 `server: Vercel`，EdgeOne 是 `Server: edgeone-pages`。
-
-### 双站读取，Worker 接收上报
-
-所有上报器直连 `https://ingest.homepage.lyjw.llc/api/ingest/<来源>`。
-`workers/ingest/src/stores/` 负责解析、写 Redis；`fanout.ts` 负责广播和通知缓存失效。
-站点仅提供页面、状态读取和 `POST /api/revalidate`，没有上报路由、rewrite、中继或事件发布入口。
-
-```text
-上报器 ──▶ ingest Worker ──▶ 共享 Redis ◀── Vercel / EdgeOne ──▶ 浏览器
-                 ├── WebSocket ─────────────────▶ 浏览器
-                 └── POST /api/revalidate ───────▶ Vercel
+```mermaid
+flowchart LR
+  Reporter[上报器] --> Worker[Worker]
+  Worker <--> SQL[StateHub / SQLite]
+  Worker --> External[Apple / GitHub]
+  Vercel[Vercel 首屏及缓存] -->|生成或后台重建时 GET /api/home| Worker
+  Worker -->|鉴权 POST /api/revalidate，仅展示变化| Vercel
+  Browser[浏览器] -->|首次 HTML / 图片| Vercel
+  Browser <-->|挂载后状态查询 / WebSocket| Worker
 ```
 
-`shared/` 保存读写共用的 Redis 键、类型和状态计算；`src/lib/` 提供读取与页面数据组装。
-Worker 只为共用 Redis 工具替换 TCP 驱动，使用自己的 R2 绑定确认图片存在。
-图片仍由上报器直传 R2，浏览器直接读取。
+Vercel 没有状态 API 转发或私有存储读取端点。聚合快照只包含公开卡片数据，凭据仅留在 Worker。浏览器配置 `NEXT_PUBLIC_BACKEND_URL` 后直接查询 Worker，SWR 仍使用统一的路径键处理推送与轮询。
 
-`/api/revalidate` 只接收普通与 urgent tag，不接收上报数据。Worker 等写入完成后调用它；
-普通 tag 使页面和 API 后台刷新，urgent tag 使 API 立即失效。鉴权使用
-`TELEMETRY_INGEST_SECRET`，未配置返回 503。站点不再配置 `LIVE_PUSH_SECRET` 或 `INGEST_PEERS`。
+首屏使用 `use cache`：stale 5 分钟、revalidate 10 分钟、expire 7 天。内容变化按 `page:<tag>` 标记 stale，已有 HTML 先返回，更新在后台执行。纯心跳只续 SQLite 中的存活时间，不触发首屏失效；实时查询按当前时间判定新鲜度。
 
-Apple Music 最近播放列表也由 Worker 刷新：页面建立 WebSocket 连接时检查一次，
-cron 每分钟在有存活连接时检查，Redis 闸门限制为至少两分钟拉取一次；无人连接时不拉。
-读取侧的目录、歌词、GitHub 等按需缓存仍在站点，业务状态写入和实时发布统一在 Worker。
+`shared/` 保存存储契约和共用计算，`workers/ingest/src/routes/` 提供公开 API。202 应答前确认持久化成功，之后使用 `waitUntil` 广播和通知 Vercel。上报在 StateHub 中串行合并，每个请求拥有独立工作副本。SQL 批次使用事务，定时清理过期数据。
 
-推 main 时 CI 部署改动的 Worker；`shared/`、共用 `src/lib/`、根依赖或路径配置变化也触发 ingest 部署。
-两份生产直接读取同一份状态，不做跨站上报传播。EdgeOne 的 `STATUS_CACHE=false`，
-状态 API 每次直读 Redis；Vercel 保留 tag 缓存，由 Worker 回敲失效。
-两站的 `NEXT_PUBLIC_LIVE_PUSH_URL` 都是 `https://ingest.homepage.lyjw.llc`，
-浏览器由它拼出 `/ws` 和 `/online/ws`，不再配置独立在线人数服务。
-
-### 上报与读取架构
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.png">
-  <img alt="七类上报来源、两个 Home Assistant 实例汇入 ingest Worker，两份站点读取共享 Redis，浏览器接收实时推送" src="docs/architecture-light.png">
-</picture>
-
-本图列出 Mac、iPhone、Home Assistant（DSM / N100 两个实例）、Emby、Agent 限额、
-日本服务器和 PlayStation 上报器。路径为统一上报契约，运行实例的核验记录见
-[`docs/reporter-endpoints.md`](docs/reporter-endpoints.md)；手机设置仍由用户自行维护。
-Worker 写 Redis、通过 `/ws` 广播，通过 `/online/ws` 统计可见页面，
-并调用 Vercel 的 `/api/revalidate`；Vercel 与 EdgeOne 提供首屏和状态 API。
-Mac 与 Emby 上报器直传 R2；国内图片仍通过 COS 异步回源读取，未缓存对象的 GET
-会重定向到 R2，不能用 HEAD 的 404 判定浏览器加载失败。交互版是自包含的一页
-[`docs/architecture.html`](docs/architecture.html)（GitHub 不渲染 HTML，克隆下来用浏览器打开），
-节点上标着对应的源码位置，可按全部上报器、国内与国际站、图片链路分别查看。
-图由 `docs/architecture.json` 生成，改了拓扑两边一起改。
-
-### 上报入口清单
-
-生产上报统一使用 `https://ingest.homepage.lyjw.llc`，路径按数据来源区分。
-配置变量仍名为 `SITE_URL` 的上报器也填这个 Worker 的源；`SITE_INGEST_URL`
-如果非空会优先覆盖它，因此切换时必须一起核对。
-
-| 上报器 | 路径 | 配置位置 |
-| --- | --- | --- |
-| Mac Telemetry Hub | `/api/ingest/mac` | 设置 → 远端上报 |
-| iPhone Telemetry Hub | `/api/ingest/iphone` | 设置 → 上报地址 |
-| Home Assistant / HomePod | `/api/ingest/homepod` | `rest_command.push_homepod_now_playing.url` |
-| Emby 推送代理 | `/api/ingest/emby` | NAS `emby-proxy/.env` 的 `SITE_URL`，运行容器名 `homepage-reporter` |
-| Agent 限额上报器 | `/api/ingest/agents` | NAS `agent-limits-reporter/.env` 的 `SITE_URL` |
-| 服务器上报器 | `/api/ingest/server` | 日本节点 `/opt/lyjwpage/server-reporter/.env` 的 `SITE_URL` |
-| PlayStation 上报 Worker | `/api/ingest/playstation` | `workers/playstation-reporter/wrangler.toml` 的 `SITE_URL` |
+发布和迁移步骤见 [状态存储架构](docs/state-storage.md)。本次仅验收海外 Vercel / Workers，国内平台不在本次发布范围。
 
 ## 状态是怎么接的
 
 所有凭据只存在于服务端，浏览器只看得到 `/api/status/*` 返回的规范化数据。这些路由共用 `src/lib/api.ts` 的信封：上游挂掉时返回 `{ ok: false, error }` 而不是 5xx，让某一路数据源离线不至于把整页 SWR 打成错误态。
 
-`src/app/api/status/` 下每一条状态 GET 的快照都走 Next `'use cache'`（`lib/status-cache`），上报按 tag 失效，轮询命中时不再每次打 Redis——**除非那份部署把 `STATUS_CACHE` 填成 `false`，那时它们一律直读 Redis**（没有例外，加新端点时不用另行登记）。这个开关是给 EdgeOne 那份准备的：`revalidateTag` 只失效**本实例**那份缓存（Next 默认是每个进程各自的内存 LRU，Vercel 另接了一套共享存储所以在那边看起来是全局的），而 EdgeOne 跑的是原样的 Next（腾讯云 SCF，多实例），上报进来了 GET 也不翻新，只能等 10 分钟兜底——2026-08-16 两边并排量过（当时 revalidate 还是 60 秒），落后 12~45 秒。两站现在读取同一个 Redis，国内这份仍关闭状态缓存以避免多实例滞后。开关只管状态端点，首屏那份得冻着才能预渲染，所以关掉之后第一帧仍可能旧到 10 分钟，挂载后 SWR 一拉就是最新的。光给两份部署各配一个共享的 `cacheHandlers` 对不齐首屏：Next 给预渲染页发的是按 `STATUS_LIFE` 算出的 ISR 头（2026-09-06 从 lyjw131.com 实测 `s-maxage=600, stale-while-revalidate=604200, durable`），Vercel 改写成 `max-age=0` 自己管，EdgeOne 原样在边缘存 10 分钟，`revalidateTag` 打不到那一份；要对齐还得在上报扇出里清 EdgeOne 缓存，目前接受这 10 分钟（并排实测两边首屏都只旧 2～3 分钟）。状态端点的 CDN 故意 `Cache-Control: no-store`：最终响应里有存活、`?since=` 切片、`expiresInMs` 这类现算字段，不能冻在边缘。函数每次进；心跳那种不触发 tag 的戳记在 overlay 里现读一把小 key。充电头历史与 GitHub 热力图的游标、奖杯目录的 `?titleids=`（展开哪块瓷砖就只发那 1–2 款，整份目录未来是几百 KB）也都是缓存命中后在内存里切全量，不按参数分键——分了就是每个游标、每块瓷砖各占一份完整快照。
+状态查询在 Worker 直读 SQLite，响应为 `Cache-Control: no-store`。新鲜度、播放进度和游标切片在每次查询时计算；历史数据不按游标另建缓存。Apple 目录、歌词、动态封面和 GitHub 数据的 TTL 缓存也只在 Worker。
 
-Redis TCP 连接按请求作用域租用：同一 Node 实例里的并发请求共用一条，最后一个请求和命令结束后主动断开。不能让 ioredis 永久单例留在 serverless 实例里——实例暂停时普通 idle timer 不会跑，旧部署和 Preview 会各留一条空闲连接。Preview 必须不配 Redis 或使用独立 `REDIS_URL`；`REDIS_PREFIX` 只隔离键，不隔离连接额度。
-
-七个来源共用 Worker 的 `/api/ingest/<来源>` 和 `TELEMETRY_INGEST_SECRET`：
-Mac、iPhone、HomePod、Emby、PlayStation、server、agents。设备遥测采用一台设备、一个入口、
-一个信封和一个 `modules` 字典。PlayStation 上报器位于 `workers/playstation-reporter/`。
-它的 cron 每分钟看一眼[那两个人头数](#三个上报器共用一套三档)：有人正看着就 60 秒一轮完整 tick，页面只是开着 2 分钟一轮，一个页面都没开压回 15 分钟一轮，**每轮都发 presence** —— 内容没变也发，那一封就是心跳：站点照样落库刷新 `observedAt`，但不广播、也不急失效，只推一次普通 tag 让快照跟着走。断流判定因此在 `/api/status/playing/now` 出口每次请求现算（`PLAYSTATION_STALE_MS`，默认 50 分钟 = 闲时三轮加余量），超窗发降级信封：**Worker 死了是「不知道他在不在玩」，不是「他离线了」**，所以宁可让卡片收起「正在游玩」那一行，也不伪造一个 `online: false`。奖杯目录只在解锁指纹变化时才推，没有 `/now`，也不走实时推送。前两个是**设备级的遥测中心**：一台设备一个入口、一个信封、一个 `modules` 字典。
-
-首屏 HTML 与状态 API 使用独立的 `page:<主题>` / `api:<主题>` 缓存标签和条目。
-普通上报让两份都后台更新；播放、充电结构等 urgent 上报只让 API 立即失效，首屏仍先返回
-旧 HTML、后台重建。首页保持 `revalidate: 10 分钟 / expire: 7 天`，挂载后由 SWR 和推送更新。
-共享缓存函数必须显式传入 `page` 或 `api`，嵌套调用也要沿用同一 scope，避免 API 标签传播
-到整页，使下一位访客被迫等待取数、封面和歌词重建。没有缓存或超过 7 天硬过期时仍需重建。
-
-缓存与上报回归先运行 `pnpm build`，再运行 `node scripts/verify-ingest-worker.mjs`。
-脚本启动独立 Redis、Worker 和 Next，验证鉴权、旧路由 404、写入、缓存失效与 WebSocket；
-配置和数据全部隔离，退出时清理。单独检查页面缓存可用 `scripts/verify-status-cache.mjs`，
-通过 `--base` 和 `--ingest` 分别指定本地 Next 与 Worker，两者需连接同一隔离 Redis。
-
-站点按需查询 Apple 目录、歌词和 GitHub 贡献日历，继续使用 TTL 缓存；
-最近在听的定时刷新、状态写入和广播由 Worker 执行。
+七个上报来源共用 `/api/ingest/<来源>` 与鉴权密钥。PlayStation 每轮 presence 都落库续时，内容未变时不广播、不通知首屏失效。Mac / iPhone 空模块心跳同样只续时。缓存和上报验证见 [验证与发布](docs/state-storage.md#验证与发布)。
 
 ### 推给浏览器 — 自建 Worker
 
@@ -146,7 +74,7 @@ Worker 的 `src/fanout.ts` 将带数据的事件直接广播到 Durable Object�
 | GET | `/online/ws` | 「此刻在线」，页面不可见时站点整条关掉；同一份来源白名单 |
 | GET | `/count` | `{ connections, online }`：开着的页面数和可见的页面数，上报器据此调整上报频率 |
 
-站点只需配置公开的 `NEXT_PUBLIC_LIVE_PUSH_URL`，浏览器由此拼接 `/ws` 和 `/online/ws`。
+站点只需配置公开的 `NEXT_PUBLIC_BACKEND_URL`，浏览器由此拼接 `/ws` 和 `/online/ws`。
 
 这里从前走 Pusher 协议（云 Pusher，或自部署 [Sockudo](https://github.com/sockudo/sockudo)）。换掉的理由不是它不好用，而是这条链路上唯一还托在别人手里的一环：单条事件 10 KB 的上限就近在眼前（两张列表 4.4 KB / 2.8 KB），免费额度按连接数和消息数计，而在线人数那条当时已经在自己的 Worker 上跑着了。两条连接如今在同一个 Worker 里，但仍是两个 Durable Object：人数那个房间人一变就要广播、连接常驻实例、静默 90 秒就踢；推送那个房间走休眠 API，静默 5 分钟不计数、30 分钟才关。口径不同，清理策略也不能共用。
 
@@ -161,7 +89,7 @@ Worker 的 `src/fanout.ts` 将带数据的事件直接广播到 Durable Object�
 | `desktop` · `listening-now` · `watching-now` · `playing-now` · `charger` · `listening` · `watching` · `playing` | 带数据，浏览器直接写进 SWR 缓存 |
 | `presence` | 只发失效通知（payload 为 `null`），浏览器自己回来取 |
 
-**一律带数据。** 两张列表曾经只发失效通知，理由是「整份太大」——实测 4.4 KB 和 2.8 KB，而发通知之后浏览器照样把整份取回来，字节一点没省，反倒多出一次请求头、一次往返、一个函数调用和一次 Redis 读，**而且是按在线人头乘的**。（那时的天花板是 Pusher 单条 10 KB，只有两倍余量；现在是 Cloudflare 单条 WebSocket 消息 1 MiB。）
+**一律带数据。** 两张列表曾经只发失效通知，理由是「整份太大」——实测 4.4 KB 和 2.8 KB，而发通知之后浏览器照样把整份取回来，字节一点没省，反倒多出一次请求头、一次往返、一个函数调用和一次 SQLite 读，**而且是按在线人头乘的**。（那时的天花板是 Pusher 单条 10 KB，只有两倍余量；现在是 Cloudflare 单条 WebSocket 消息 1 MiB。）
 
 只有 `presence` 仍是失效通知：它翻的是「上报器还在不在」。亲口离线是布尔值，浏览器要重取 `declaredOffline`；超时那条拿 payload 里的 `lastSeenAt` 和 `heartbeatWindowMs` 自己就能翻，源站不再算 `stale`。窗口默认 5 分钟（约三倍心跳），可用 `HEARTBEAT_WINDOW_MS` 改。
 
@@ -186,7 +114,7 @@ Authorization: Bearer <TELEMETRY_INGEST_SECRET>
 
 Emby 对拖动进度条不发任何通知，那部分只能查会话。查的人是代理不是站点：它在播时每 2 秒问一次 `/Sessions`，但只在位置偏离站点的推算值超过 1.5 秒时才推 —— 站点算得准的时候推它等于白花一次函数调用。
 
-状态存在 Redis（`lib/emby-store.ts` 的 mirrorKey，Redis 为主、进程内存为辅），站点不再向 Emby 拉任何东西。读路径上 `/api/status/watching` 和 `/api/status/watching/now` 跟着 `STATUS_CACHE` 走，和别的状态接口同一套。前端契约没变，两条仍是分开的：前者跟着 60 秒的推送走，后者跟着播放事件走，合在一起的话慢的那半只能跟着快的那半一起被重取。
+状态存在 SQLite（`lib/emby-store.ts` 的 mirrorKey，SQLite 为主、进程内存为辅），站点不再向 Emby 拉任何东西。读路径上 `/api/status/watching` 和 `/api/status/watching/now` 由 Worker 直读 SQLite，和别的状态接口同一套。前端契约没变，两条仍是分开的：前者跟着 60 秒的推送走，后者跟着播放事件走，合在一起的话慢的那半只能跟着快的那半一起被重取。
 
 剧集自身的 `Primary` 图是剧照而不是海报，所以竖版海报优先取所属剧的 `SeriesPrimaryImageTag`。这个选择在代理那侧做 —— 字节是它下载的，挑哪张的逻辑跟着走才不会分家。
 
@@ -194,9 +122,9 @@ Emby 对拖动进度条不发任何通知，那部分只能查会话。查的人
 
 海报由 Emby 上报器一次压成 WebP，以 `<sha256>.webp` 直传 R2；站点只接收对象键，响应时再用当前部署的 `R2_PUBLIC_BASE_URL` 拼公开地址。所以同一次上报传播到两份部署之后，Vercel 可以直连 R2，EdgeOne 可以改走以 R2 为源站的 COS CDN。上报器传之前先 HEAD 问一次桶里有没有，所以桶被清空、换机器、重启都能自己发现要补传，不必等站点回执。地址即内容指纹，所以对象带 `max-age=31536000, immutable`，浏览器直连交付域取图，站点没有图片读写或转码路径。
 
-- **条目里存的是「图片键」而不是地址**（`imageKey`，由代理按 `itemId:kind:tag:height` 拼，图换了 ImageTag 键就换），读取时才换成地址。图片和列表是分两次推来的：列表先到、图片可能还在路上，或者 Redis 被清空后只需补图。晚到的那批图能把已经存着的列表一起点亮，不用整份重推。
-- **响应里回 `missingImages`**：站点引用了却没有的键。代理据此补传，Redis 清空、容器换机器之后不需要人工干预。
-- **上报器直传图片**：Emby 海报在代理侧用 sharp 压成 `<sha256>.webp`、Mac 图标用系统原生编码器压成 `<sha256>.png`，都由上报器直传 R2。Worker 只 HEAD 校验并保存对象键，公开 URL 在读取时按部署环境组装；Redis 里不存完整 URL 或任何图片二进制。HEAD 结果只缓存 5 分钟——桶被清空后 Worker 要能重新发现对象没了，否则会一直发指向已删对象的 URL。
+- **条目里存的是「图片键」而不是地址**（`imageKey`，由代理按 `itemId:kind:tag:height` 拼，图换了 ImageTag 键就换），读取时才换成地址。图片和列表是分两次推来的：列表先到、图片可能还在路上，或者 SQLite 被清空后只需补图。晚到的那批图能把已经存着的列表一起点亮，不用整份重推。
+- **响应里回 `missingImages`**：站点引用了却没有的键。代理据此补传，SQLite 清空、容器换机器之后不需要人工干预。
+- **上报器直传图片**：Emby 海报在代理侧用 sharp 压成 `<sha256>.webp`、Mac 图标用系统原生编码器压成 `<sha256>.png`，都由上报器直传 R2。Worker 只 HEAD 校验并保存对象键，公开 URL 在读取时按部署环境组装；SQLite 里不存完整 URL 或任何图片二进制。HEAD 结果只缓存 5 分钟——桶被清空后 Worker 要能重新发现对象没了，否则会一直发指向已删对象的 URL。
 
 > 卡片的「在 Emby 里打开」跳转链接指向 `EMBY_PUBLIC_URL`，源站地址会出现在页面 HTML 里 —— 这是有意为之，不用改：Emby 前面有认证网关，跳过去的人会撞到认证。没配这个变量就不给链接，没有内网地址可退，退了也是个点不开的链接。
 
@@ -204,13 +132,13 @@ Apple Music 的封面没有代理，仍走 `mzstatic.com` 直链 —— 那本�
 
 ### 最近在听 — Apple Music
 
-列表由 ingest Worker 请求 `/v1/me/recent/played`（`workers/ingest/src/apple-music-recent.ts`），写入 Redis 后推送浏览器并使站点缓存失效。
+列表由 ingest Worker 请求 `/v1/me/recent/played`（`workers/ingest/src/apple-music-recent.ts`），写入 SQLite 后推送浏览器并使站点缓存失效。
 
 **为什么当时要一个常驻进程。** 因为那时这份列表还兼着推断「此刻在不在听」：Apple 没有可查的当前播放接口，只能连续盯着列表里排第一的那项什么时候换人，再对照容器总时长猜它有没有播完。连续观测这件事在 serverless 上做不了——状态存在进程内存里，每个实例各有一份、活不到下一次切换。**那个推断已经撤掉了**，于是常驻的理由也没了。
 
 **为什么撤掉它。** 它只在 Mac 和 HomePod 同时没声时才可能露面（有实况就以实况为准），而那正是它最没把握的时候：一直循环同一张专辑时第一项不变，会被当成已经停了；只听了一首就走开，仍按整张时长算，能一直显示在听；停下来但没换过东西的情况根本分辨不出来。卡片上那枚 `inferred` 角标就是在说「这一句我也不确定」。**现在「在不在播」只认设备实况**，这份列表只回答「听过什么」。
 
-刷新由 ingest Worker 驱动：WebSocket 建立时检查，cron 每分钟在有存活连接时检查一次；Redis 两分钟闸门限制真正的拉取。无人连接时不拉取。新列表通过 Worker 推送和缓存失效送到页面，状态 GET 只读取已写入的数据。
+刷新由 ingest Worker 驱动：WebSocket 建立时检查，cron 每分钟在有存活连接时检查一次；SQLite 两分钟闸门限制真正的拉取。无人连接时不拉取。新列表通过 Worker 推送和缓存失效送到页面，状态 GET 只读取已写入的数据。
 
 TTL 定在分钟级不是为了「在听」的精度（那个已经没有了），是为了 hero 那条取色带：实时播放的封面配色是拿当前专辑 ID 去这份列表里借的，刚开播的那张要等它进了列表才有颜色可借。两分钟落在一首歌之内。
 
@@ -220,9 +148,9 @@ TTL 定在分钟级不是为了「在听」的精度（那个已经没有了）�
 
 MusicKit 签出来的 developer token 寿命约一个月（**Apple 没承诺这个数字**，实测在 29～30 天之间浮动过），上报器从它自己的 JWT 解出 `exp`，过了「上报时刻 → 到期时刻」的中点就重签重发。取相对中点而不是写死提前量，正是因为寿命不由 Apple 承诺，写死在两个方向上都可能错。实践中上报器重启比半个寿命周期频繁得多，所以多数情况是每次启动重传一份新的。Worker 只管收下最新的一份，不做提前判断——用的时候手上是哪份就用哪份，被 Apple 拒了就是这一轮作废。
 
-凭据存 Redis，和 `telemetryState` 严格分开 —— 后者会经 `/api/status/*` 发到浏览器。那个 ingest 路由也不打印请求体。
+凭据存 SQLite，和 `telemetryState` 严格分开 —— 后者会经 `/api/status/*` 发到浏览器。那个 ingest 路由也不打印请求体。
 
-**没有服务端自签的回落。** 有回落就意味着私钥仍得躺在服务器上，这套东西就白做了。代价是 Mac 上报器长期离线且 Redis 也丢了凭据时「最近在听」直接失败，这是明摆着的取舍。
+**没有服务端自签的回落。** 有回落就意味着私钥仍得躺在服务器上，这套东西就白做了。代价是 Mac 上报器长期离线且 SQLite 也丢了凭据时「最近在听」直接失败，这是明摆着的取舍。
 
 **这份凭据也不从任何端点发出去。** 从前 `GET /api/ingest/apple-music` 把它转交给拉列表的上报器，代价是 `TELEMETRY_INGEST_SECRET` 从此和收听记录同等敏感（拿到密钥就能取走 token）；拉列表迁入 Worker 后，那条路和那个代价一起没了。
 
@@ -236,11 +164,11 @@ MusicKit 签出来的 developer token 寿命约一个月（**Apple 没承诺这�
 
 hero 上此刻在播的那首，副标题那一行会跟着进度条换成正在唱的那句；前奏、间奏、没有歌词的曲子和历史条目仍是艺人名。不另起一行：hero 的 80px 已经用掉 76px，两版 hero 的高度又必须一致。
 
-**歌词只在 amp-api 上有，而且要两把钥匙一起。** 公开目录 API（`api.music.apple.com`）不给歌词；`amp-api.music.apple.com/v1/catalog/{sf}/songs/{id}/lyrics` 是网页播放器自己用的内部端点，`Authorization` 要的是从 `music.apple.com` 的 JS bundle 里扒出来的 web token（和动态封面同一份，扒取、Redis 共享、401 作废都在 `lib/apple-web-token`），订阅身份走 `Media-User-Token` —— 就是上面 Mac 上报器推来的那份凭据里的 music user token。缺后者时 amp-api 回的不是 401，而是和「这首歌没有歌词」**一模一样**的 404，所以「没有」只缓存一小时，有词的缓存 7 天；目录查询那一步顺手带回 `hasLyrics`，目录说没有的浏览器根本不问。
+**歌词只在 amp-api 上有，而且要两把钥匙一起。** 公开目录 API（`api.music.apple.com`）不给歌词；`amp-api.music.apple.com/v1/catalog/{sf}/songs/{id}/lyrics` 是网页播放器自己用的内部端点，`Authorization` 要的是从 `music.apple.com` 的 JS bundle 里扒出来的 web token（和动态封面同一份，扒取、SQLite 共享、401 作废都在 `lib/apple-web-token`），订阅身份走 `Media-User-Token` —— 就是上面 Mac 上报器推来的那份凭据里的 music user token。缺后者时 amp-api 回的不是 401，而是和「这首歌没有歌词」**一模一样**的 404，所以「没有」只缓存一小时，有词的缓存 7 天；目录查询那一步顺手带回 `hasLyrics`，目录说没有的浏览器根本不问。
 
 先要字级（`/syllable-lyrics`，`itunes:timing="Word"`，每个字一个带 begin/end 的 `<span>`），404 再退回行级（`/lyrics`）。字级那份的每句多一个 `words`，hero 上那一句按字从左到右点亮：每个字一个 span，`--sung` 是唱到了几成，CSS 把「已唱 / 未唱」两色渐变裁进文字（`.lyric-word`），播放中 rAF 每帧直接写 DOM，不走 React 重渲染。只有行级的歌整句一起亮。TTML 解析在 `lib/lyrics-ttml`（`<head>` 里的翻译不当成行，`x-bg` 和声整层丢掉，字间空格挂到前一个字后面所以 words 拼起来就是整句），哪句该亮在 `lib/lyrics-cue`，两个都是纯函数、都有测试。换句那一刻由一个定在边界上的闹钟驱动，不靠进度条那个整秒计时器；position 和进度条、字的点亮、「一起听」读的是 `lib/track-position` 同一份算法。响应 `no-store`，浏览器不留；同一页里 `hooks/use-lyrics` 按 songId 只问一次，模块级缓存兜着。
 
-**`GET /api/lyrics?song=<目录曲目 ID>` 和 `GET /api/motion-artwork?url=<链接>` 按参数答；不带参数答的是此刻在播那首。** 带参那条是给网页播放器的：访客在自己那边放「最近在听」里任意一张专辑的任意一首，服务端的「此刻在播」快照说的是主人的歌，帮不上他。带参响应按 URL 缓存，浏览器和 CDN 都存（`public` + `s-maxage`）：一首歌的歌词、一张专辑的动态封面都不会变，有的存 7 天 / 24 小时，「没有」只存 1 小时，和 Redis 那层同一个尺度。09-03 曾把参数拿掉、改成服务端自决，为的是关掉「任意 ID 换歌词」这个公开代理；09-07 按需求开回来，从前那道「只答此刻在播和排在后面几首」的白名单没有恢复 —— 播放器要放整张专辑，名单圈不住。剩下的门只有 Sec-Fetch-Site：别家网站借访客浏览器来问会被拒，直接打 URL 的人拦不住，这是明知的取舍。不带参的问法留给卡片 hero：服务端读和 `/api/status/listening/now` 同一份快照、同一种取法（`lib/now-listening-read`，否则国内那份部署会「那边已是新歌、这边还是旧的」），自己决定取哪首，响应随时间变所以 `no-store`。两种问法响应都带 `songId` / `link` 让浏览器对号，对不上只挡 5 秒再问。目录说 `hasLyrics` 为 false 的不去问 Apple；浏览器那侧「没有」只记一小时，和服务端同一个尺度。
+**`GET /api/lyrics?song=<目录曲目 ID>` 和 `GET /api/motion-artwork?url=<链接>` 按参数答；不带参数答的是此刻在播那首。** 带参那条是给网页播放器的：访客在自己那边放「最近在听」里任意一张专辑的任意一首，服务端的「此刻在播」快照说的是主人的歌，帮不上他。带参响应按 URL 缓存，浏览器和 CDN 都存（`public` + `s-maxage`）：一首歌的歌词、一张专辑的动态封面都不会变，有的存 7 天 / 24 小时，「没有」只存 1 小时，和 SQLite 那层同一个尺度。09-03 曾把参数拿掉、改成服务端自决，为的是关掉「任意 ID 换歌词」这个公开代理；09-07 按需求开回来，从前那道「只答此刻在播和排在后面几首」的白名单没有恢复 —— 播放器要放整张专辑，名单圈不住。剩下的门只有 Sec-Fetch-Site：别家网站借访客浏览器来问会被拒，直接打 URL 的人拦不住，这是明知的取舍。不带参的问法留给卡片 hero：服务端读和 `/api/status/listening/now` 同一份快照、同一种取法（`lib/now-listening-read`，否则国内那份部署会「那边已是新歌、这边还是旧的」），自己决定取哪首，响应随时间变所以 `no-store`。两种问法响应都带 `songId` / `link` 让浏览器对号，对不上只挡 5 秒再问。目录说 `hasLyrics` 为 false 的不去问 Apple；浏览器那侧「没有」只记一小时，和服务端同一个尺度。
 
 ### 跟着一起听 — MusicKit
 
@@ -286,7 +214,7 @@ hero 上此刻在播的那首，副标题那一行会跟着进度条换成正在
 
 卡片**不主动**连本机端口。在这台 Mac 上打开 `/local/charging` 才会去连 `http://127.0.0.1:8787/sse/charger` 和 `/sse/powerbank`：端点往 localStorage 写一条记录再跳回首页，这台浏览器以后进站都会连。连上就改用这条约 1 Hz 的本机推流，不再用远端那份；连不上立刻放弃、不重试，远端照旧。
 
-**总功率历史存在服务端**（`lib/charger-store.ts`，Redis；未配置 Redis 时退回进程内存）。客户端自己累积的话页面一刷新曲线就没了、还要攒很久才有形状。环形缓冲保留 400 点，两点之间至少间隔 `MIN_SAMPLE_GAP_MS`（当前 5 秒），足以覆盖固定 20 分钟图表窗口。
+**总功率历史存在服务端**（`lib/charger-store.ts`，SQLite；未配置 SQLite 时退回进程内存）。客户端自己累积的话页面一刷新曲线就没了、还要攒很久才有形状。环形缓冲保留 400 点，两点之间至少间隔 `MIN_SAMPLE_GAP_MS`（当前 5 秒），足以覆盖固定 20 分钟图表窗口。
 
 曲线的横坐标**按时间戳映射**而不是按序号等距铺开 —— 漏推一次就会有空档，等距会把那段画得和正常间隔一样宽。
 
@@ -301,7 +229,7 @@ hero 上此刻在播的那首，副标题那一行会跟着进度条换成正在
 - **没有温度字段，上游也不给历史** —— 曲线是本站自己攒的
 
 **充电宝（A110G）** 走完全相同的来路：同一台 Mac 把 BLE 解出来的读数塞进
-`chargingDevices`，本站按 `kind` 挑出来，落在 `lib/powerbank-store.ts`（Redis 为主、
+`chargingDevices`，本站按 `kind` 挑出来，落在 `lib/powerbank-store.ts`（SQLite 为主、
 进程内存兜底），读取走 `/api/status/powerbank`，卡片是 `components/live/powerbank-card.tsx`，
 本机浏览时同样是打开 `/local/charging` 才直连 `/sse/powerbank`。收卡口径也和充电头一致：上报器离线、或者超过
 `powerBankStaleAfterMs()` 没收到新推送，就把 `connected` 打成 `false`，浏览器不再自己算
@@ -366,21 +294,21 @@ Mac 信封保持这三个模块：
 `/api/status/vibecoding/year` 不再使用 `since`、`daysPartial` 或 `from`；GitHub 贡献图的增量机制不变。
 
 切换采集器前应备份旧摘要与可导出的逐日历史，核对各来源 token、非零日期、会话数及费用覆盖；
-本站 Redis 里的累计摘要和每日前五模型不能还原完整逐来源明细。新用量报文要求来源状态和费用完整性，
+本站 SQLite 里的累计摘要和每日前五模型不能还原完整逐来源明细。新用量报文要求来源状态和费用完整性，
 旧摘要不作为新协议读取，首份新摘要到达前仍可展示独立上报的限额。
 
-本地端到端回归使用 `scripts/verify-coding-usage.mjs`。先启动连接独立 Redis 的开发站点，
+本地端到端回归使用 `scripts/verify-coding-usage.mjs`。先启动连接独立 SQLite 的开发站点，
 显式设置测试用 `REDIS_PREFIX` 与 `TELEMETRY_INGEST_SECRET=local-token-usage-verification`，
 关闭 peers / push，并暂停向该站点写入的上报器。保留默认状态缓存，验证覆盖实际缓存失效链路：
 
 ```sh
 node scripts/verify-coding-usage.mjs \
-  --redis-prefix token-usage-dev-20260905 \
+  --storage-prefix token-usage-dev-20260905 \
   --snapshot /tmp/lyjw-usage-snapshot.json
 ```
 
-默认只连接 `http://localhost:3211` 和 `redis://127.0.0.1:6389`，可分别用 `--base`、
-`--redis-url` 指定其他本机测试地址；脚本拒绝非本机目标、默认 Redis 端口和未明确标识为测试的前缀，
+默认只连接 `http://localhost:3211` 和 `storage://127.0.0.1:6389`，可分别用 `--base`、
+`--storage-url` 指定其他本机测试地址；脚本拒绝非本机目标、默认 SQLite 端口和未明确标识为测试的前缀，
 不读取 `.env`。它验证鉴权、旧协议拒绝、仅有限额、未知用量与真实零、重复上报、独立 now 更新、
 非法年度模块不部分写入、371 天整份刷新及旧日上调/下调。结束时恢复原有限额，并上报和读回
 `--snapshot` 指定的 Mac CLI `{ usage, now, year }`；未传文件则留下合成基线。
@@ -435,11 +363,11 @@ POST /api/ingest/mac
 
 上面那些模块的指纹一个都没变时，发的是**空 `modules` 的信封**，也就是一次纯心跳：只刷新存活，不动任何模块的时间戳。心跳无变化时每 ≥30 秒一条，有数据要发时不补——那个包本身就证明上报器活着。这个间隔正在往 90 秒放宽（纯心跳是 `/api/ingest/mac` 的主要流量）：**站点这侧先把存活窗口放宽到 5 分钟，上报器再降频**，顺序反了会有一段时间全站断续显示离线。
 
-从前心跳和优雅下线走独立的 `/api/ingest/presence`，于是「上报器还活着」这一件事在服务端有两个写入点。现在只有这一条路：`presence: "offline"` 覆盖退出、睡眠这类优雅离开，崩溃、断网、强制关机时上报器什么都发不出来，那些仍靠「多久没收到」的超时兜底（默认 5 分钟，约三倍心跳，可用 `HEARTBEAT_WINDOW_MS` 改），两者互补。窗口盖在 presence 的 `heartbeatWindowMs` 上，浏览器用这一份。存活本身单独存一个 Redis key（`lib/reporter-liveness`），不再搭遥测状态那份镜像的车——那样多实例部署时，没接过上报的实例手上永远是零，会把卡片全判成离线。
+从前心跳和优雅下线走独立的 `/api/ingest/presence`，于是「上报器还活着」这一件事在服务端有两个写入点。现在只有这一条路：`presence: "offline"` 覆盖退出、睡眠这类优雅离开，崩溃、断网、强制关机时上报器什么都发不出来，那些仍靠「多久没收到」的超时兜底（默认 5 分钟，约三倍心跳，可用 `HEARTBEAT_WINDOW_MS` 改），两者互补。窗口盖在 presence 的 `heartbeatWindowMs` 上，浏览器用这一份。存活本身单独存一个 SQLite key（`lib/reporter-liveness`），不再搭遥测状态那份镜像的车——那样多实例部署时，没接过上报的实例手上永远是零，会把卡片全判成离线。
 
 各模块的指纹粒度决定了「无变化」有多容易达成：`chargingDevices`（充电头和充电宝在同一个列表里）含功率/电压/电流，充电中几乎每轮都变；`desktop` 是应用名 + bundleID + 图标，不切应用就不变；`appleMusic` 的进度**不入签名**，所以播放中也不变，只有 seek 偏离锚点超过容差才算；`timezone` 只有 IANA 标识、当前 UTC 偏移或缩写变化时才重发；三个 vibe coding 模块各看自己那份载荷有没有变，`vibeCodingUsage` 带着采集时刻所以每轮必发，`vibeCodingNow` 在没动过键盘的那些轮次里一动不动。真正的零 telemetry 场景是充电头和充电宝都没动静（没在充也没在放）、不切前台应用、音乐不换曲不 seek、时区不变、vibe coding 采集器未刷新——此时只有每 30 秒一条空 `modules` 的心跳。
 
-前台应用图标由 Mac 一次缩放成 96px PNG（系统原生编码，不依赖任何外部二进制）并直传 R2，网站只接收对象键 `<sha256>.png`、HEAD 确认后组出公开直链。**没有服务端接收图片二进制的回退**：`iconData` 一旦出现在信封里就直接报错。`iconHash` 标识「哪个应用的图标」（应用有图标就非空，编码或上传失败也照样有），对象键标识「哪份字节」，两者分开才能让站点回执区分「这个应用没图标」和「图标还没准备好」——从前它们是同一个哈希，编码一失败就静默丢图、永不重试。状态里只存公开直链，普通状态心跳不会重复携带图片。时区模块只上传 IANA 标识、当前偏移和缩写，不上传地址。时区只进首屏，没有 status 端点。公开读取按用途拆开，以 `src/app/api/status/` 下的目录为准：`/api/status/desktop`、`/api/status/charger`、`/api/status/powerbank`、`/api/status/listening`、`/api/status/listening/now`、`/api/status/watching`、`/api/status/watching/now`、`/api/status/playing`、`/api/status/playing/now`、`/api/status/trophies`、`/api/status/vibecoding`、`/api/status/vibecoding/year`、`/api/status/activity`、`/api/status/server`、`/api/status/github-chart`。活动圆环来自 iPhone Telemetry Hub（见下面那节），落地节点那条来自节点上的上报器（`reporters/server-reporter`），最后那条不由任何上报器喂，是站点自己去 GitHub GraphQL 取的（所以它是唯一不参与 tag 失效的一条 —— 同样自己拉的「最近在听」参与，因为它落库、有 tag、也推），其余都对应上面某个模块。
+前台应用图标由 Mac 一次缩放成 96px PNG（系统原生编码，不依赖任何外部二进制）并直传 R2，网站只接收对象键 `<sha256>.png`、HEAD 确认后组出公开直链。**没有服务端接收图片二进制的回退**：`iconData` 一旦出现在信封里就直接报错。`iconHash` 标识「哪个应用的图标」（应用有图标就非空，编码或上传失败也照样有），对象键标识「哪份字节」，两者分开才能让站点回执区分「这个应用没图标」和「图标还没准备好」——从前它们是同一个哈希，编码一失败就静默丢图、永不重试。状态里只存公开直链，普通状态心跳不会重复携带图片。时区模块只上传 IANA 标识、当前偏移和缩写，不上传地址。时区只进首屏，没有 status 端点。公开读取按用途拆开，以 `workers/ingest/src/routes/status/` 下的目录为准：`/api/status/desktop`、`/api/status/charger`、`/api/status/powerbank`、`/api/status/listening`、`/api/status/listening/now`、`/api/status/watching`、`/api/status/watching/now`、`/api/status/playing`、`/api/status/playing/now`、`/api/status/trophies`、`/api/status/vibecoding`、`/api/status/vibecoding/year`、`/api/status/activity`、`/api/status/server`、`/api/status/github-chart`。活动圆环来自 iPhone Telemetry Hub（见下面那节），落地节点那条来自节点上的上报器（`reporters/server-reporter`），最后那条不由任何上报器喂，是 Worker 去 GitHub GraphQL 取的（所以它是唯一不参与 tag 失效的一条 —— 同样自己拉的「最近在听」参与，因为它落库、有 tag、也推），其余都对应上面某个模块。
 
 ### HomePod mini 播放实况
 
@@ -454,10 +382,10 @@ Authorization: Bearer <TELEMETRY_INGEST_SECRET>
 进度跳变那条触发器不能少：单曲循环时曲名和播放状态都不变，只有进度归零，
 少了它服务端就不知道这首又从头开始了。
 
-接收端复用统一遥测密钥，状态写入 Redis（未配置时退回进程内存）。`/api/status/listening/now`
+接收端复用统一遥测密钥，状态写入 SQLite（未配置时退回进程内存）。`/api/status/listening/now`
 按「MacBook 在播 → MacBook 暂停未满 10 秒 → HomePod 在播 → HomePod 暂停未满 10 秒」
-选来源。两个候选跟着 `STATUS_CACHE` 冻或不冻，选择和 `expiresInMs` 每次请求现算，
-所以暂停宽限期到点再问能换到下一首，而不用等 Redis。事件带有进度观测时间，前端据此自己
+选来源。两个候选在 Worker 每次现读，选择和 `expiresInMs` 每次请求现算，
+所以暂停宽限期到点再问能换到下一首，而不用等 SQLite。事件带有进度观测时间，前端据此自己
 推算进度。
 
 这个宽限期是全站唯一一条「不靠新上报、光靠时间流逝就会改变结果」的规则，而那个

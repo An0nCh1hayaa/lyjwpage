@@ -49,10 +49,10 @@ export function appleStorefront(): string {
 export async function resolveCredentials(): Promise<Credentials> {
   const result = await readAppleMusicCredentials();
   if (!result.ok) {
-    // 两种没有，修法相反：一个去看 Redis，一个去点授权按钮
+    // 两种没有，修法相反：一个去看 SQLite，一个去点授权按钮
     throw new Error(
-      result.reason === "redis-unreachable"
-        ? "读不到 Apple Music 凭据 —— Redis 连不上，凭据本身可能还在"
+      result.reason === "storage-unreachable"
+        ? "读不到 Apple Music 凭据 —— Storage 连不上，凭据本身可能还在"
         : "没有收到 Mac 上报器的 Apple Music 凭据 —— 在上报器的设置里授权 Apple Music",
     );
   }

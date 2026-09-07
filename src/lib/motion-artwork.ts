@@ -13,7 +13,7 @@ import type { AppleMusicParsed } from "@/lib/motion-artwork-url";
  * 而扒来的 token 本来就一分钱凭据不用。token 的扒取、缓存、401 作废在
  * lib/apple-web-token，和歌词那条路共用。
  *
- * 缓存从 Cloudflare 边缘缓存换成 lib/cache（Redis 为主、进程内存兜底），
+ * 缓存从 Cloudflare 边缘缓存换成 lib/cache（SQLite 为主、进程内存兜底），
  * TTL 沿用 Worker 的约定：**有**动态封面 24 小时，**确认没有** 1 小时 ——
  * 后者短是留给「专辑后来补了动态封面」的翻案窗口。上游出错不写缓存，
  * 只留 5 秒负缓存挡穿透。带参的响应 CDN 也存一份，不带参的 no-store（见

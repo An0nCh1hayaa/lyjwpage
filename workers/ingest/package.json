@@ -3,13 +3,13 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Telemetry ingest, Redis writes and browser live push on Cloudflare Workers and Durable Objects",
+  "description": "Telemetry ingest, SQLite state and browser live push on Cloudflare Workers and Durable Objects",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/*.test.ts"
+    "test": "node --test --experimental-strip-types --import ../../src/lib/testing/register-alias.mjs ../../src/lib/sqlite-store.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250214.0",

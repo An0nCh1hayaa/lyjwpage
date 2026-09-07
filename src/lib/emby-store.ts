@@ -41,7 +41,7 @@ export async function getNowPlaying(): Promise<ResolvedNowPlaying | null> {
 /**
  * 推算部分单拎出来，不带取数。
  *
- * 上报那条路上刚写下去的那份就在手上，用不着等它落库再从 Redis 读回来 ——
+ * 上报那条路上刚写下去的那份就在手上，用不着等它落库再从 SQLite 读回来 ——
  * 读回来的还可能是写之前的那份。
  */
 export function resolveNowPlaying(state: EmbyNowPlaying | null): ResolvedNowPlaying | null {

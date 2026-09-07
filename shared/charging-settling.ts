@@ -1,4 +1,4 @@
-import { key } from "@/lib/redis";
+import { key } from "@/lib/storage";
 
 /**
  * 插拔之后那段「读数还在跳」的窗口。

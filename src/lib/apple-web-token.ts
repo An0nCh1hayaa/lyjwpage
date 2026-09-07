@@ -1,3 +1,4 @@
+import { requestState } from "@shared/request-state";
 import { get, put, remove } from "@/lib/cache";
 
 /**
@@ -13,9 +14,9 @@ import { get, put, remove } from "@/lib/cache";
  * 从动态封面（lib/motion-artwork）里抽出来的：歌词也要走同一份 token、同一套
  * 401 作废逻辑，两处各扒一遍就是两份缓存、两个刷新点，401 时还得各清各的。
  *
- * 三层缓存：模块全局（serverless 上即每实例一份）→ Redis（全站共享）→ 真扒。
+ * 三层缓存：模块全局（serverless 上即每实例一份）→ SQLite（全站共享）→ 真扒。
  * 扒取是这条链路最脆的一环 —— 从数据中心 IP 反复抓 music.apple.com 的页面和
- * JS bundle，Apple 哪天上验证页或改打包产物路径就断。共享进 Redis 后，全站扒取
+ * JS bundle，Apple 哪天上验证页或改打包产物路径就断。共享进 SQLite 后，全站扒取
  * 频率从「每个冷实例一次」降到「每个半衰期一次」。
  */
 
@@ -25,9 +26,9 @@ let tokenExpiresAt = 0;
  * 正在取 token 的那一次。in-flight 去重是进程内的：它挡的是冷启动后的一批并发
  * 请求各自把整个 JS bundle（几百 KB）扒一遍。
  */
-let tokenInflight: Promise<string> | null = null;
+const tokenRequest = () => requestState("web-token", () => ({ inflight: null as Promise<string> | null }));
 
-/** Redis 里那份共享 web token 的键。两份生产各自的 Redis 各存一份 */
+/** Storage 里那份共享 web token 的键。两份生产各自的 Storage 各存一份 */
 const TOKEN_CACHE_KEY = "apple-web-token";
 
 type StoredToken = { token: string; expiresAt: number };
@@ -55,16 +56,16 @@ export async function getWebToken(): Promise<string> {
     return cachedToken;
   }
 
-  tokenInflight ??= loadWebToken().finally(() => {
-    tokenInflight = null;
+  tokenRequest().inflight ??= loadWebToken().finally(() => {
+    tokenRequest().inflight = null;
   });
-  return tokenInflight;
+  return tokenRequest().inflight!;
 }
 
 /**
- * 先问 Redis，没有才真扒。
+ * 先问 SQLite，没有才真扒。
  *
- * Redis 不可达时 get 返回 undefined，静默落回本实例自己扒 —— token 读取失败
+ * SQLite 不可达时 get 返回 undefined，静默落回本实例自己扒 —— token 读取失败
  * 不能把整个解析拖死，代价只是回到从前的每实例一扒。
  */
 async function loadWebToken(): Promise<string> {
@@ -119,7 +120,7 @@ async function scrapeWebToken(): Promise<string> {
  */
 function tokenRefreshAt(expMs: number): number {
   const now = Date.now();
-  // 取整：/2 有一半概率除出 x.5，而这个值既存进 Redis 也当 TTL 用
+  // 取整：/2 有一半概率除出 x.5，而这个值既存进 SQLite 也当 TTL 用
   return now + Math.max(Math.ceil((expMs - now) / 2), 60 * 60 * 1000);
 }
 
@@ -146,9 +147,9 @@ function parseJwtExp(jwt: string): number {
  *
  * **401 清 token，但只清「挨了这记 401 的那份」。** 清本身是老教训：从前只有
  * `/album/` 那条路清，`/song/` 那条静默返回 null，token 一失效那条路会一直
- * 失败到 tokenExpiresAt 自然到期。带条件比对是 Redis 共享后补的：翻新窗口里
+ * 失败到 tokenExpiresAt 自然到期。带条件比对是 SQLite 共享后补的：翻新窗口里
  * 拿旧 token 的请求还在天上飞，它们的迟到 401 若无条件清，会把别的实例刚扒好
- * 写进 Redis 的新 token（或本实例已翻新的全局）一并作废，害下一个冷实例白扒
+ * 写进 SQLite 的新 token（或本实例已翻新的全局）一并作废，害下一个冷实例白扒
  * 一遍。GET 和 DEL 之间残留毫秒级窗口，撞上的代价也只是多扒一次，不上锁。
  */
 export async function ampFetch<T>(
@@ -170,9 +171,9 @@ export async function ampFetch<T>(
   if (!resp.ok) {
     if (resp.status === 401) {
       /*
-       * 全局那份放到最后清。反过来（先清全局再 await Redis）的话，等待的
-       * 那个来回里，同实例的并发请求会从还没删掉的 Redis 把这个已判死的
-       * token 重新装回全局 —— 随后 Redis 被删空、快路径却一直用死 token。
+       * 全局那份放到最后清。反过来（先清全局再 await SQLite）的话，等待的
+       * 那个来回里，同实例的并发请求会从还没删掉的 SQLite 把这个已判死的
+       * token 重新装回全局 —— 随后 SQLite 被删空、快路径却一直用死 token。
        * 挪到 await 之后重读现值，复活了也当场抓回来。
        */
       const stored = await get<StoredToken>(TOKEN_CACHE_KEY);

@@ -1,7 +1,7 @@
 /**
  * 各 agent 限额那份的纯逻辑：按 id 合并、按 id 贴回用量行。
  *
- * 不碰 Redis、不碰 Next：lib/vibecoding 只负责把这里的结果放进镜像、从镜像取出，
+ * 不碰 SQLite、不碰 Next：lib/vibecoding 只负责把这里的结果放进镜像、从镜像取出，
  * 所以这两个函数能直接进单测。
  */
 

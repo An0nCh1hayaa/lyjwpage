@@ -1,4 +1,4 @@
-import { askRedis, withRedis } from "@/lib/redis";
+import { askStorage, withStorage } from "@/lib/storage";
 import { fallback, K_LAST_PUSH, K_LATEST, type Stored } from "@shared/powerbank-store";
 
 function fromMemory(): Stored | null {
@@ -8,8 +8,8 @@ function fromMemory(): Stored | null {
 }
 
 async function readLatest(): Promise<Stored | null> {
-  const answered = await askRedis((redis) => redis.get(K_LATEST));
-  // Redis 答不上话，只能信内存
+  const answered = await askStorage((storage) => storage.get(K_LATEST));
+  // SQLite 答不上话，只能信内存
   if (!answered.reachable) return fromMemory();
 
   if (answered.value) {
@@ -20,7 +20,7 @@ async function readLatest(): Promise<Stored | null> {
       // 脏数据按「答不上来」算，不按「没有」—— 否则会连累好好的内存副本
       return fromMemory();
     }
-    // 写失败过时内存这份更新，别被 Redis 里故障前的旧值盖回去
+    // 写失败过时内存这份更新，别被 SQLite 里故障前的旧值盖回去
     if (!fallback.persisted && fallback.latest && fallback.receivedAt > stored.receivedAt) {
       return fromMemory();
     }
@@ -30,7 +30,7 @@ async function readLatest(): Promise<Stored | null> {
     return stored;
   }
 
-  // Redis 明确说没有：内存那份没落库过才还算数，落过库说明是真被清了
+  // SQLite 明确说没有：内存那份没落库过才还算数，落过库说明是真被清了
   return fallback.persisted ? null : fromMemory();
 }
 
@@ -49,7 +49,7 @@ export async function getStored() {
 
 /** 最近一次推送的到达时刻，0 表示从没收到过 */
 export async function lastPushReceivedAt() {
-  const raw = await withRedis(async (redis) => redis.get(K_LAST_PUSH), null);
-  const fromRedis = raw ? Number(raw) : 0;
-  return Math.max(fromRedis || 0, fallback.lastPushAt);
+  const raw = await withStorage(async (storage) => storage.get(K_LAST_PUSH), null);
+  const fromStorage = raw ? Number(raw) : 0;
+  return Math.max(fromStorage || 0, fallback.lastPushAt);
 }

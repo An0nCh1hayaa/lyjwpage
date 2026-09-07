@@ -1,4 +1,4 @@
-import { mirrorKey } from "@/lib/redis";
+import { mirrorKey } from "@/lib/storage";
 import type { ReporterPresence } from "@/lib/types";
 
 /**
@@ -19,15 +19,15 @@ import type { ReporterPresence } from "@/lib/types";
 export type Liveness = Pick<ReporterPresence, "lastSeenAt" | "declaredOffline">;
 
 /**
- * 存活单独占一个 Redis key，读写都直查 Redis。
+ * 存活单独占一个 SQLite key，读写都直查 SQLite。
  *
  * 从前它是纯进程内存，靠遥测状态那份镜像搭车持久化 —— 于是两个进程各有一份
  * 各自的「上次见到」：多实例部署时，没接过上报的那个实例手上永远是零，四张卡
  * 全被判成离线，而另一个实例好好的。存活是全站共享的一个事实，得存在共享的
  * 地方。
  *
- * 「Redis 为主、进程内存为辅」的规则见 lib/redis 的 mirrorKey：Redis 答得上话
- * 就以它为准，不可达才退回内存副本 —— 单机部署因此和从前一样能跑，Redis 没配
+ * 「SQLite 为主、进程内存为辅」的规则见 lib/storage 的 mirrorKey：SQLite 答得上话
+ * 就以它为准，不可达才退回内存副本 —— 单机部署因此和从前一样能跑，SQLite 没配
  * 或挂掉都只是退化成进程内的判断，不会把页面打成离线。
  */
 export const mirror = mirrorKey<Liveness>(

@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 export const metadata: Metadata = { title: "404" };
 
 /**
- * 静态 404：不读 Redis、不取遥测。首页那个 Header 中间要塞桌面遥测，这里没有
+ * 静态 404：不读 SQLite、不取遥测。首页那个 Header 中间要塞桌面遥测，这里没有
  * 数据可喂，所以只留两端 —— 站名和主题开关。
  */
 export default function NotFound() {

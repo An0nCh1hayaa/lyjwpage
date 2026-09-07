@@ -7,7 +7,7 @@
  * 按 id 贴回去。站点按需取用，不要再拆 `quotaProviders` —— 那是按展示形态裁过
  * 的字段，加一列明细就要改信封。
  *
- * 这份文件不碰 Redis：校验是纯函数，测试和入库走同一条。
+ * 这份文件不碰 SQLite：校验是纯函数，测试和入库走同一条。
  */
 
 import { object, text } from "./json.ts";

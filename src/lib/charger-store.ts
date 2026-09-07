@@ -1,4 +1,4 @@
-import { askRedis, withRedis, type RedisAnswer } from "@/lib/redis";
+import { askStorage, withStorage, type StorageAnswer } from "@/lib/storage";
 import type { ChargerSample } from "@/lib/types";
 import { type ChargerState, disconnectedHistoryExpired, fallback, K_HISTORY, K_LAST_PUSH, K_LATEST, type Stored } from "@shared/charger-store";
 
@@ -13,8 +13,8 @@ function fromMemory(): Stored | null {
 }
 
 async function readLatest(): Promise<Stored | null> {
-  const answered = await askRedis((redis) => redis.get(K_LATEST));
-  // Redis 答不上话，只能信内存
+  const answered = await askStorage((storage) => storage.get(K_LATEST));
+  // SQLite 答不上话，只能信内存
   if (!answered.reachable) return fromMemory();
 
   if (answered.value) {
@@ -25,7 +25,7 @@ async function readLatest(): Promise<Stored | null> {
       // 脏数据按「答不上来」算，不按「没有」—— 否则会连累好好的内存副本
       return fromMemory();
     }
-    // 写失败过时内存这份更新，别被 Redis 里故障前的旧值盖回去
+    // 写失败过时内存这份更新，别被 SQLite 里故障前的旧值盖回去
     if (!fallback.persisted && fallback.latest && fallback.receivedAt > stored.receivedAt) {
       return fromMemory();
     }
@@ -39,7 +39,7 @@ async function readLatest(): Promise<Stored | null> {
     return { ...stored, disconnectedAt: disconnectedAt || null };
   }
 
-  // Redis 说没有：写进去过就是真被删了
+  // SQLite 说没有：写进去过就是真被删了
   if (fallback.persisted) {
     fallback.latest = null;
     fallback.receivedAt = 0;
@@ -51,14 +51,14 @@ async function readLatest(): Promise<Stored | null> {
 }
 
 /**
- * 曲线不比时间戳，比 latest 那份就够 —— 两者同一次写入、同生共死。Redis 故障
+ * 曲线不比时间戳，比 latest 那份就够 —— 两者同一次写入、同生共死。SQLite 故障
  * 窗里漏掉几个功率点在图上看不出来，为它单独记一套新旧不值当。
  *
  * 裁决和取数分开：两条命令要能和快照那条同时发车（见 readChargerState），
  * 而裁决里要看 `fallback.persisted`，那是快照那条读完才定的 —— 顺序不能靠
  * 「谁先 await」碰运气，只能等两条都回来了再算。
  */
-function acceptHistory(answered: RedisAnswer<string[]>): ChargerSample[] {
+function acceptHistory(answered: StorageAnswer<string[]>): ChargerSample[] {
   if (!answered.reachable) return [...fallback.history];
 
   if (answered.value.length) {
@@ -82,7 +82,7 @@ function acceptHistory(answered: RedisAnswer<string[]>): ChargerSample[] {
 }
 
 function askHistory() {
-  return askRedis((redis) => redis.lrange(K_HISTORY, 0, -1));
+  return askStorage((storage) => storage.listRange(K_HISTORY, 0, -1));
 }
 
 async function readHistory(): Promise<ChargerSample[]> {
@@ -117,8 +117,8 @@ export async function getStored() {
 
 /** 最近一次推送的到达时刻，0 表示从没收到过推送 */
 export async function lastPushReceivedAt() {
-  const raw = await withRedis(async (redis) => redis.get(K_LAST_PUSH), null);
-  const fromRedis = raw ? Number(raw) : 0;
-  return Math.max(fromRedis || 0, fallback.lastPushAt);
+  const raw = await withStorage(async (storage) => storage.get(K_LAST_PUSH), null);
+  const fromStorage = raw ? Number(raw) : 0;
+  return Math.max(fromStorage || 0, fallback.lastPushAt);
 }
 export { type ChargerLanding, type ChargerState } from "@shared/charger-store";

@@ -5,8 +5,8 @@
  * 序列。从前两边各写一份字面量，改一处忘一处就会静默错位 —— 客户端留得比
  * 服务端多，多出来的那截永远填不满；留得少，翻页式的抖动。
  *
- * 单独放一个文件是因为它得同时被 Redis 那侧（charger-store）和浏览器那侧
- * （charger-history）导入。搁在 charger-store 里会把 ioredis 拖进客户端包。
+ * 单独放一个文件是因为它得同时被 SQLite 那侧（charger-store）和浏览器那侧
+ * （charger-history）导入。搁在 charger-store 里会把 服务端存储驱动 拖进客户端包。
  * 这里不 import 任何东西，两边都能安全引。
  */
 

@@ -66,9 +66,9 @@ const REFRESH_MS = 10 * 60_000;
  * 手上一份都没有时的那一档。
  *
  * 空着的时候松不得。这份列表现在由**访客自己的请求**触发去拉（见
- * lib/apple-music-recent），所以冷启动那一下 —— 新部署、Redis 被清空 —— 第一个
+ * lib/apple-music-recent），所以冷启动那一下 —— 新部署、SQLite 被清空 —— 第一个
  * 访客的首屏必然是空的，数据要等他这次请求在响应之后刷完才落库，落完靠推送送达。
- * 而推送没配（`NEXT_PUBLIC_LIVE_PUSH_URL` 是可以不填的，那时「页面只靠轮询更新」）
+ * 而推送没配（`NEXT_PUBLIC_BACKEND_URL` 是可以不填的，那时「页面只靠轮询更新」）
  * 或 WebSocket 恰好还没连上时，就只剩轮询这一条路 —— 上面那档意味着卡片顶着一句
  * 「Apple Music 未连接」站十分钟，而实际上数据一秒后就在库里了。
  *
@@ -669,7 +669,7 @@ export function ListeningCard({
   fallback: StatusResponse<ListeningPayload>;
   nowFallback: StatusResponse<NowListeningPayload>;
   /**
-   * 首屏当前曲目的同步歌词数据，由服务端在直读 Redis 缓存后冻进首屏 HTML。
+   * 首屏当前曲目的同步歌词数据，由服务端在直读 SQLite 缓存后冻进首屏 HTML。
    */
   lyricsFallback?: LyricsFallback | null;
   /**
@@ -716,7 +716,7 @@ export function ListeningCard({
   /**
    * 闩住这首歌的目录解析结果。
    *
-   * songId 是服务端拿曲名现查目录得来的，而那条链路（凭据、Redis、Apple 上游）
+   * songId 是服务端拿曲名现查目录得来的，而那条链路（凭据、Storage、Apple 上游）
    * 任何一环抖一下，songId 就会在**歌照播**的情况下丢半分钟 —— 跟听把它当成
    * 「主人停了」，先暂停、解析恢复再播放，就是切歌边界那种一停一播的来源。
    * 同一首还在播就沿用上一次解析出的 songId / 预排队列；换歌后新曲还没解析

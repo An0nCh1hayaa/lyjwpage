@@ -30,7 +30,7 @@ type PhoneEnvelope = {
 };
 
 export async function recordPhoneEnvelope(input: unknown, receivedAt = Date.now()) {
-  // 校验排在任何 I/O 之前：纯计算，不值得为一封写坏的报文先跑一趟 Redis
+  // 校验排在任何 I/O 之前：纯计算，不值得为一封写坏的报文先跑一趟 SQLite
   const envelope = object(input) as PhoneEnvelope | null;
   if (!envelope || envelope.version !== 1) {
     throw new Error("手机遥测协议 version 必须为 1");

@@ -36,16 +36,16 @@ function completeCredentials(
 /**
  * 带原因的读取。
  *
- * 「Redis 连不上」和「上报器还没授权过」都表现为拿不到凭据，但修法完全相反 ——
- * 前者去看 Redis，后者去点授权按钮。报错里指错方向会白白浪费一轮排查，实测
- * 遇到过：凭据明明在 Redis 里，只是容器重建那几秒断连，页面却说「去授权」。
+ * 「SQLite 连不上」和「上报器还没授权过」都表现为拿不到凭据，但修法完全相反 ——
+ * 前者去看 SQLite，后者去点授权按钮。报错里指错方向会白白浪费一轮排查，实测
+ * 遇到过：凭据明明在 SQLite 里，只是容器重建那几秒断连，页面却说「去授权」。
  */
 export async function readAppleMusicCredentials(): Promise<
   | { ok: true; credentials: StoredAppleMusicCredentials }
-  | { ok: false; reason: "redis-unreachable" | "never-pushed" }
+  | { ok: false; reason: "storage-unreachable" | "never-pushed" }
 > {
   const credentials = completeCredentials(await mirror.get());
   if (credentials) return { ok: true, credentials };
-  return { ok: false, reason: (await mirror.reachable()) ? "never-pushed" : "redis-unreachable" };
+  return { ok: false, reason: (await mirror.reachable()) ? "never-pushed" : "storage-unreachable" };
 }
 export { type AppleMusicCredentialsUpdate } from "@shared/apple-music-credentials";

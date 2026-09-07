@@ -6,7 +6,7 @@ import {
 } from "@/lib/apple-music";
 import { cached, claim } from "@/lib/cache";
 import { LISTENING_TAG } from "@/lib/live-events";
-import { withRedisScope } from "@/lib/redis";
+import { withStorageScope } from "@/lib/storage";
 import type { ListeningItem } from "@/lib/types";
 import { fanout } from "@ingest/fanout";
 import { prepareRecentlyPlayed } from "@ingest/stores/apple-music-store";
@@ -14,7 +14,7 @@ import { afterResponse } from "./live-platform";
 
 /**
  * Worker 刷新最近播放列表。连接建立时检查，cron 在有存活连接时每分钟检查。
- * Redis 的两分钟闸门限制上游请求频率；站点只读取写好的结果。
+ * SQLite 的两分钟闸门限制上游请求频率；站点只读取写好的结果。
  */
 
 /** 上游端点的硬限制就是 10，传更大直接 400 */
@@ -43,15 +43,15 @@ const RECENT_REFRESH_MS = 2 * 60_000;
 const REFRESH_KEY = "apple-music:recent:refresh:v1";
 
 /**
- * 本实例上一次**试着**刷新的时刻，用来在打 Redis 之前先挡一道。
+ * 本实例上一次**试着**刷新的时刻，用来在打 SQLite 之前先挡一道。
  *
- * 闸门本身在 Redis 上（那是全站共享的那一份），但光有它的话，每一次
- * `/api/status/listening/now` 轮询都要为「该不该刷」多问 Redis 一趟 —— 而那是
+ * 闸门本身在 SQLite 上（那是全站共享的那一份），但光有它的话，每一次
+ * `/api/status/listening/now` 轮询都要为「该不该刷」多问 SQLite 一趟 —— 而那是
  * 全站最热的一条端点，多出来的往返按人头乘。这个进程内的时刻挡掉的正是这些：
  * 同一个实例一个 TTL 内只会去问一次。
  *
  * 每个实例各有一份、各自计时，所以它不是「多久刷一次」的保证，只是省掉重复的
- * 提问 —— 真正说了算的仍是 Redis 上那道闸。**试过就算**，被 Redis 那道挡回来
+ * 提问 —— 真正说了算的仍是 SQLite 上那道闸。**试过就算**，被 SQLite 那道挡回来
  * 也照样记上：不然这个实例会为同一段窗口反复去问。
  */
 let attemptedAt = 0;
@@ -268,14 +268,14 @@ async function assemble(): Promise<ListeningItem[]> {
   return items;
 }
 
-/** 进程内节流减少 Redis 往返，SET NX PX 保证多个实例同一窗口只拉一次。 */
+/** 进程内节流减少 Storage 往返，SET NX PX 保证多个实例同一窗口只拉一次。 */
 export function refreshRecentlyPlayed(): Promise<void> {
   const now = Date.now();
   if (now - attemptedAt < RECENT_REFRESH_MS) return Promise.resolve();
   attemptedAt = now;
 
   return afterResponse(async () => {
-    await withRedisScope(async () => {
+    await withStorageScope(async () => {
       if (!(await claim(REFRESH_KEY, RECENT_REFRESH_MS))) return;
 
       try {
@@ -284,7 +284,7 @@ export function refreshRecentlyPlayed(): Promise<void> {
         await fanout({
           writes: [commit()],
           events: changed ? [{ type: "listening", payload: listening }] : [],
-          urgentTags: changed ? [LISTENING_TAG] : [],
+          tags: changed ? [LISTENING_TAG] : [],
         });
       } catch (error) {
         console.error("[apple-music]", error instanceof Error ? error.message : String(error));

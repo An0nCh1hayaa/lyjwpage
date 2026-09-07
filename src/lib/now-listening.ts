@@ -10,7 +10,7 @@ import type { LocalNowPlaying, NowListeningPayload } from "@/lib/types";
  */
 export const MUSIC_PAUSE_GRACE_MS = 10_000;
 
-/** Redis 里的两个候选。不含存活、不选 Hero，所以能进 `'use cache'`。 */
+/** Storage 里的两个候选。不含存活、不选 Hero，所以能进 `'use cache'`。 */
 export type NowListeningSnapshot = {
   mac: NowListeningCandidate | null;
   homePod: NowListeningCandidate | null;
