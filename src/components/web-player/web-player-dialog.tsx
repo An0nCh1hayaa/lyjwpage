@@ -97,7 +97,7 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
   const listRef = usePlaylistSnap(player.item?.id);
   const [activePositionMs, setActivePositionMs] = useState(0);
   const [activeDurationMs, setActiveDurationMs] = useState(0);
-  const [, setIsDragging] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [seekEvent, setSeekEvent] = useState<{ targetMs: number; at: number } | null>(null);
 
   const isDraggingRef = useRef(false);
@@ -115,6 +115,8 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
 
   const positionMs = isItemActive ? activePositionMs : 0;
   const durationMs = isItemActive ? activeDurationMs : 0;
+  const percent =
+    durationMs > 0 ? Math.min(100, Math.max(0, (positionMs / durationMs) * 100)) : 0;
 
   useEffect(() => {
     return () => {
@@ -263,46 +265,73 @@ export function WebPlayerDialog({ player }: { player: WebPlayer }) {
             ) : null}
 
             <div className="mt-3">
-              <input
-                type="range"
-                aria-label="播放进度"
-                disabled={!isItemActive}
-                min={0}
-                max={durationMs > 0 ? durationMs : 1000}
-                step={1000}
-                value={Math.min(positionMs, durationMs > 0 ? durationMs : 1000)}
-                onPointerDown={() => {
-                  if (!isItemActive) return;
-                  isDraggingRef.current = true;
-                  setIsDragging(true);
-                }}
-                onChange={(e) => {
-                  if (!isItemActive) return;
-                  isDraggingRef.current = true;
-                  setIsDragging(true);
-                  setActivePositionMs(Number(e.target.value));
-                }}
-                onPointerUp={(e) => {
-                  if (!isItemActive) return;
-                  commitSeek(Number((e.target as HTMLInputElement).value));
-                }}
-                onPointerCancel={(e) => {
-                  if (!isItemActive) return;
-                  commitSeek(Number((e.target as HTMLInputElement).value));
-                }}
-                onKeyUp={(e) => {
-                  if (!isItemActive) return;
-                  // 只认真的在挪滑块的键：Tab 走开、Escape 关窗也会经过这里，
-                  // 那时 seek 一下等于把正在放的歌拽回滑块当前的整秒
-                  if (!SEEK_KEYS.has(e.key)) return;
-                  commitSeek(Number((e.target as HTMLInputElement).value));
-                }}
+              <div
                 className={cn(
-                  "w-full accent-live",
+                  "group relative flex h-4 w-full touch-none select-none items-center",
                   isItemActive ? "cursor-pointer" : "cursor-default opacity-50",
                 )}
-              />
-              <div className="label-mono flex justify-between text-muted-foreground tabular-nums">
+              >
+                {/* 轨道底槽 */}
+                <div className="relative h-1 w-full overflow-hidden rounded-full bg-muted transition-[height] duration-150 group-hover:h-1.5">
+                  {/* 已播放彩色填充 */}
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      isPlaying ? "bg-live" : "bg-muted-foreground",
+                    )}
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+
+                {/* 悬停/拖拽时精致圆点滑块 */}
+                <div
+                  className={cn(
+                    "pointer-events-none absolute size-2.5 -translate-x-1/2 rounded-full bg-foreground shadow-sm ring-2 ring-surface transition-all duration-150",
+                    isDragging
+                      ? "scale-125 opacity-100"
+                      : "opacity-80 sm:opacity-0 sm:group-hover:opacity-100 sm:group-hover:scale-110",
+                  )}
+                  style={{ left: `${percent}%` }}
+                />
+
+                {/* 原生隐藏 Range Input：全权负责无障碍操作与各端拖拽事件 */}
+                <input
+                  type="range"
+                  aria-label="播放进度"
+                  disabled={!isItemActive}
+                  min={0}
+                  max={durationMs > 0 ? durationMs : 1000}
+                  step={1000}
+                  value={Math.min(positionMs, durationMs > 0 ? durationMs : 1000)}
+                  onPointerDown={() => {
+                    if (!isItemActive) return;
+                    isDraggingRef.current = true;
+                    setIsDragging(true);
+                  }}
+                  onChange={(e) => {
+                    if (!isItemActive) return;
+                    isDraggingRef.current = true;
+                    setIsDragging(true);
+                    setActivePositionMs(Number(e.target.value));
+                  }}
+                  onPointerUp={(e) => {
+                    if (!isItemActive) return;
+                    commitSeek(Number((e.target as HTMLInputElement).value));
+                  }}
+                  onPointerCancel={(e) => {
+                    if (!isItemActive) return;
+                    commitSeek(Number((e.target as HTMLInputElement).value));
+                  }}
+                  onKeyUp={(e) => {
+                    if (!isItemActive) return;
+                    if (!SEEK_KEYS.has(e.key)) return;
+                    commitSeek(Number((e.target as HTMLInputElement).value));
+                  }}
+                  className="absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-default"
+                />
+              </div>
+
+              <div className="label-mono mt-1 flex justify-between text-muted-foreground tabular-nums">
                 <span>{formatClock(positionMs)}</span>
                 {/* 试听时总长是 0:30，前面点明，免得以为整首就这么短 */}
                 <span>
