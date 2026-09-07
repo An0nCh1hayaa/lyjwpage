@@ -1,3 +1,4 @@
+import { withRequestState } from "@shared/request-state";
 import { DurableObject } from "cloudflare:workers";
 
 import { HANDLERS } from "./ingest-handlers";
@@ -164,7 +165,7 @@ function parseBody(raw: string): unknown {
   }
 }
 
-/** 鉴权与解析在响应前完成；202 表示接收，写入、推送和失效通过 waitUntil 完成。 */
+/** 鉴权、解析与持久化在 202 应答前完成，广播和首屏通知由 waitUntil 执行。 */
 async function handleIngest(
   request: Request,
   env: Env,
@@ -338,7 +339,7 @@ export class LivePushRoom extends DurableObject<Env> {
 const worker = {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!env.STATE || !(await getRoom(env).connectionCount())) return;
-    await requestStore.run({ env, ctx }, () => refreshRecentlyPlayed());
+    await withRequestState(() => requestStore.run({ env, ctx }, () => refreshRecentlyPlayed()));
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -373,7 +374,7 @@ const worker = {
       if (rejected) return rejected;
       const response = await getRoom(env).fetch(request);
       if (response.status === 101 && env.STATE) {
-        await requestStore.run({ env, ctx }, () => refreshRecentlyPlayed());
+        await withRequestState(() => requestStore.run({ env, ctx }, () => refreshRecentlyPlayed()));
       }
       return response;
     }

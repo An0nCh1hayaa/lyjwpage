@@ -1,3 +1,5 @@
+import { displayChanged } from "@shared/display-change";
+import { mirror } from "@shared/homepod-store";
 import { NOW_LISTENING_TAG } from "@/lib/live-events";
 import { fanout } from "@ingest/fanout";
 import { normalizeHomePodEvent, writeHomePodEvent } from "@ingest/stores/homepod-store";
@@ -14,10 +16,11 @@ import { homePodListeningEvent } from "@ingest/stores/telemetry";
  */
 export async function recordHomePodEvent(body: unknown) {
   const stored = normalizeHomePodEvent(body);
+  const changed = displayChanged(await mirror.get(), stored);
   await fanout({
     writes: [writeHomePodEvent(stored)],
     events: [homePodListeningEvent(stored)],
-    tags: [NOW_LISTENING_TAG],
+    tags: changed ? [NOW_LISTENING_TAG] : [],
   });
   return { source: stored.music.source, state: stored.music.state };
 }

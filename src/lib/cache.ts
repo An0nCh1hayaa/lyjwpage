@@ -21,7 +21,7 @@ type Entry = {
   persisted: boolean;
 };
 
-const memory = new Map<string, Entry>();
+const memory = () => requestState("cache-memory", () => new Map<string, Entry>());
 const inflightMap = () => requestState("cache-inflight", () => new Map<string, Promise<unknown>>());
 
 /**
@@ -39,10 +39,10 @@ const NEGATIVE_TTL_MS = 5_000;
 const NEGATIVE_PREFIX = "neg";
 
 function memoryEntry(k: string): Entry | undefined {
-  const hit = memory.get(k);
+  const hit = memory().get(k);
   if (!hit) return undefined;
   if (hit.expiresAt <= Date.now()) {
-    memory.delete(k);
+    memory().delete(k);
     return undefined;
   }
   return hit;
@@ -54,12 +54,12 @@ function memoryGet<T>(k: string): T | undefined {
 
 function memorySet(k: string, value: unknown, ttlMs: number, persisted: boolean) {
   // 重新插入，让它排到末尾：淘汰的总是最久没被写过的那条
-  memory.delete(k);
-  memory.set(k, { value, expiresAt: Date.now() + Math.max(1_000, ttlMs), persisted });
-  while (memory.size > MEMORY_LIMIT) {
-    const oldest = memory.keys().next().value;
+  memory().delete(k);
+  memory().set(k, { value, expiresAt: Date.now() + Math.max(1_000, ttlMs), persisted });
+  while (memory().size > MEMORY_LIMIT) {
+    const oldest = memory().keys().next().value;
     if (oldest === undefined) break;
-    memory.delete(oldest);
+    memory().delete(oldest);
   }
 }
 
@@ -137,7 +137,7 @@ export async function claim(k: string, ttlMs: number): Promise<boolean> {
  * 期间的请求全部陪葬。
  */
 export async function remove(k: string) {
-  memory.delete(k);
+  memory().delete(k);
   await withStorage(async (storage) => storage.remove(key("cache", k)), null);
 }
 

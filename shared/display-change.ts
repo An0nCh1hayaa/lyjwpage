@@ -1,4 +1,4 @@
-const clocks = new Set(["receivedAt", "pushedAt", "observedAt", "updatedAt", "collectedAt", "timestamp"]);
+const clocks = new Set(["receivedAt", "pushedAt", "observedAt", "updatedAt", "collectedAt", "timestamp", "positionMs"]);
 export function displayChanged(previous: unknown, next: unknown): boolean {
   const normalized = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(normalized);

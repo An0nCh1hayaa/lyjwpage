@@ -9,7 +9,7 @@ Worker 是唯一数据后端。上报、状态 API、Apple / GitHub 获取和缓
 - TTL 读取时检查，闹钟每小时分批回收过期项；导入保留原始绝对过期时间，重试不覆盖目标已有值。
 - `/api/status/*`、`/api/home`、`/api/lyrics`、`/api/motion-artwork` 只输出明确的公开模型。没有 HTTP 通用数据库读写端点，服务端凭据不进入 Vercel、HTML 或状态响应。CORS 限制浏览器来源；公开 API 不以 CORS 当作秘密鉴权。
 - `/api/ingest/*` 使用 `TELEMETRY_INGEST_SECRET`。临时 `/api/internal/storage/import` 使用独立 `STATE_IMPORT_SECRET`，不授予 Vercel，迁移后删除 Secret。
-- `LIVE_PUSH` 与 `ONLINE_COUNTER` 分别使用可休眠 WebSocket；`/count` 同时返回两种人数。
+- `LIVE_PUSH` 使用可休眠 WebSocket，`ONLINE_COUNTER` 维护可见连接并按空闲超时清扫；`/count` 同时返回两种人数。
 
 ## 首屏与浏览器
 

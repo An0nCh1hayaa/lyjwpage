@@ -24,20 +24,33 @@ if (values.export) {
       for (const key of result[1]) keys.add(key);
     } while (cursor !== "0");
     const entries = [];
-    for (const key of keys) {
-      const kind = await redis.type(key);
-      if (kind === "none") continue;
-      assert.ok(["string", "list", "hash"].includes(kind), `Unsupported entry type: ${kind}`);
+    const names = [...keys];
+    // 按小批次流水读取，切换期间无需逐键等待数百次网络往返。
+    for (let offset = 0; offset < names.length; offset += 50) {
+      const batch = names.slice(offset, offset + 50);
+      const types = await redis.pipeline(batch.map(key => ["type", key])).exec();
+      assert.ok(types && types.every(([error]) => !error), "Export type lookup failed");
+      const pipe = redis.pipeline();
+      const selected = [];
+      for (let index = 0; index < batch.length; index++) {
+        const kind = types[index][1];
+        if (kind === "none") continue;
+        assert.ok(["string", "list", "hash"].includes(kind), `Unsupported entry type: ${kind}`);
+        const key = batch[index];
+        selected.push({ key, kind });
+        pipe.pttl(key);
+        if (kind === "string") pipe.get(key);
+        if (kind === "hash") pipe.hgetall(key);
+        if (kind === "list") pipe.lrange(key, 0, -1);
+      }
+      if (!selected.length) continue;
       const observedAt = Date.now();
-      const pipe = redis.pipeline().pttl(key);
-      if (kind === "string") pipe.get(key);
-      if (kind === "hash") pipe.hgetall(key);
-      if (kind === "list") pipe.lrange(key, 0, -1);
       const result = await pipe.exec();
       assert.ok(result && result.every(([error]) => !error), "Export read failed");
-      const ttl = Number(result[0][1]);
-      if (ttl === -2) continue;
-      entries.push({ key, kind, value: result[1][1], expiresAt: ttl < 0 ? null : observedAt + ttl });
+      selected.forEach(({ key, kind }, index) => {
+        const ttl = Number(result[index * 2][1]);
+        if (ttl !== -2) entries.push({ key, kind, value: result[index * 2 + 1][1], expiresAt: ttl < 0 ? null : observedAt + ttl });
+      });
     }
     // The new module store has one field table, without the old redundant JSON blob.
     const blobKey = `${prefix}:telemetry:state`;

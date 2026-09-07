@@ -117,6 +117,12 @@ try {
     await eventually(async () => assert.equal(await nowPlaying(), title));
     await eventually(async () => assert.ok(events.some(e => e.type === 'listening-now' && e.payload.music?.title === title)));
   }
+  await eventually(async () => assert.ok(notices.some(n => n.tags?.includes('listening-now'))));
+  await sleep(200);
+  const homePodNotices = notices.length;
+  await post(worker, '/api/ingest/homepod', { entityId: 'media_player.isolated', state: 'playing', title: 'isolated-second', positionMs: 2000, durationMs: 3600000, observedAt: Date.now() });
+  await sleep(200);
+  assert.equal(notices.length, homePodNotices, 'HomePod position heartbeat must not invalidate page');
   console.log('PASS: Worker write → Durable Object SQLite → /api/revalidate → direct Worker status; WebSocket receives both updates');
   const response = await post(worker, '/api/ingest/mac', { version: 4, heartbeatAt: Date.now(), presence: 'online', activeModules: ['timezone'], modules: { timezone: { identifier: 'Asia/Singapore', secondsFromGMT: 28800 } } });
   assert.equal(response.status, 202);

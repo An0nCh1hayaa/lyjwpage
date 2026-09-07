@@ -92,7 +92,10 @@ assert.equal(await report(second), 202);
 // Ingest returns 202; its waitUntil work must finish before testing the next read.
 await sleep(500);
 const page = await home();
-assert.equal(page.cache, "STALE", "Content updates must not evict the prerendered HTML");
+if (base.hostname.endsWith(".vercel.app")) {
+  // Vercel 的边缘 HIT 不等于内部 tag 未标 stale；下面直接检查旧 HTML 和后台替换。
+  assert.ok(["HIT", "STALE"].includes(page.cache), "Existing HTML must remain cacheable");
+} else assert.equal(page.cache, "STALE", "Content updates must not evict the prerendered HTML");
 assert.ok(page.html.includes(first), "The first visitor receives the previous HTML");
 assert.ok(!page.html.includes(second));
 assert.equal((await nowPlaying()).music?.title, second, "The first API read must get the new playback state");
