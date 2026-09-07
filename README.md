@@ -9,7 +9,7 @@
 | 框架 | Next.js 16 App Router（Turbopack）                            |
 | UI   | React 19 · Tailwind CSS v4（CSS-first，无 `tailwind.config`） |
 | 动画 | `motion` · `@number-flow/react`（实时数字滚动）               |
-| 数据 | Route Handlers 代理 + SWR 轮询 + 自建 Worker 推送             |
+| 数据 | Worker 状态 API + SWR 轮询 + WebSocket 推送             |
 | 字体 | Geist Sans / Geist Mono（本地字体包，构建不依赖网络）         |
 
 ## 跑起来
@@ -168,13 +168,13 @@ hero 上此刻在播的那首，副标题那一行会跟着进度条换成正在
 
 先要字级（`/syllable-lyrics`，`itunes:timing="Word"`，每个字一个带 begin/end 的 `<span>`），404 再退回行级（`/lyrics`）。字级那份的每句多一个 `words`，hero 上那一句按字从左到右点亮：每个字一个 span，`--sung` 是唱到了几成，CSS 把「已唱 / 未唱」两色渐变裁进文字（`.lyric-word`），播放中 rAF 每帧直接写 DOM，不走 React 重渲染。只有行级的歌整句一起亮。TTML 解析在 `lib/lyrics-ttml`（`<head>` 里的翻译不当成行，`x-bg` 和声整层丢掉，字间空格挂到前一个字后面所以 words 拼起来就是整句），哪句该亮在 `lib/lyrics-cue`，两个都是纯函数、都有测试。换句那一刻由一个定在边界上的闹钟驱动，不靠进度条那个整秒计时器；position 和进度条、字的点亮、「一起听」读的是 `lib/track-position` 同一份算法。响应 `no-store`，浏览器不留；同一页里 `hooks/use-lyrics` 按 songId 只问一次，模块级缓存兜着。
 
-**`GET /api/lyrics?song=<目录曲目 ID>` 和 `GET /api/motion-artwork?url=<链接>` 按参数答；不带参数答的是此刻在播那首。** 带参那条是给网页播放器的：访客在自己那边放「最近在听」里任意一张专辑的任意一首，服务端的「此刻在播」快照说的是主人的歌，帮不上他。带参响应按 URL 缓存，浏览器和 CDN 都存（`public` + `s-maxage`）：一首歌的歌词、一张专辑的动态封面都不会变，有的存 7 天 / 24 小时，「没有」只存 1 小时，和 SQLite 那层同一个尺度。09-03 曾把参数拿掉、改成服务端自决，为的是关掉「任意 ID 换歌词」这个公开代理；09-07 按需求开回来，从前那道「只答此刻在播和排在后面几首」的白名单没有恢复 —— 播放器要放整张专辑，名单圈不住。剩下的门只有 Sec-Fetch-Site：别家网站借访客浏览器来问会被拒，直接打 URL 的人拦不住，这是明知的取舍。不带参的问法留给卡片 hero：服务端读和 `/api/status/listening/now` 同一份快照、同一种取法（`lib/now-listening-read`，否则国内那份部署会「那边已是新歌、这边还是旧的」），自己决定取哪首，响应随时间变所以 `no-store`。两种问法响应都带 `songId` / `link` 让浏览器对号，对不上只挡 5 秒再问。目录说 `hasLyrics` 为 false 的不去问 Apple；浏览器那侧「没有」只记一小时，和服务端同一个尺度。
+**`GET /api/lyrics?song=<目录曲目 ID>` 和 `GET /api/motion-artwork?url=<链接>` 按参数答；不带参数答的是此刻在播那首。** 带参那条是给网页播放器的：访客在自己那边放「最近在听」里任意一张专辑的任意一首，服务端的「此刻在播」快照说的是主人的歌，帮不上他。带参响应按 URL 缓存，浏览器和 CDN 都存（`public` + `s-maxage`）：一首歌的歌词、一张专辑的动态封面都不会变，有的存 7 天 / 24 小时，「没有」只存 1 小时，和 SQLite 那层同一个尺度。09-03 曾把参数拿掉、改成服务端自决，为的是关掉「任意 ID 换歌词」这个公开代理；09-07 按需求开回来，从前那道「只答此刻在播和排在后面几首」的白名单没有恢复 —— 播放器要放整张专辑，名单圈不住。Worker 统一用 CORS 校验浏览器来源；公开接口不以来源检查作为秘密鉴权。不带参的问法留给卡片 hero：服务端读和 `/api/status/listening/now` 同一份快照、同一种取法（`lib/now-listening-read`，否则国内那份部署会「那边已是新歌、这边还是旧的」），自己决定取哪首，响应随时间变所以 `no-store`。两种问法响应都带 `songId` / `link` 让浏览器对号，对不上只挡 5 秒再问。目录说 `hasLyrics` 为 false 的不去问 Apple；浏览器那侧「没有」只记一小时，和服务端同一个尺度。
 
 ### 跟着一起听 — MusicKit
 
 卡片右上角那个「一起听」：访客用**自己的** Apple Music 订阅授权，MusicKit 在他自己那边放同一首、对到同一个进度。站点不转发任何音频 —— 传过去的只有一个目录 ID 和一个秒数，播放和计费都发生在访客和 Apple 之间。
 
-**我的凭据碰不到这条路径。** 上面那份 Mac 推来的 token 带着 `Music-User-Token`，拿到就能读我的收听记录，所以它锁在 `TELEMETRY_INGEST_SECRET` 后面、只发给上报器。跟听要的是另一种东西：一份发给**任意访客**的 developer token，访客拿它去换自己的用户令牌。两者敏感度差一个量级，不共用一条路径，也不共用一把锁。
+**我的凭据碰不到这条路径。** 上面那份 Mac 推来的 token 带着 `Music-User-Token`，拿到就能读我的收听记录，所以它只留在 Worker 的 SQLite 中，不经公开端点发出。跟听要的是另一种东西：一份发给**任意访客**的 developer token，访客拿它去换自己的用户令牌。两者敏感度差一个量级，不共用一条路径，也不共用一把锁。
 
 **签发放在 [workers/musickit-token](workers/musickit-token)。** 私钥不进站点的运行时 —— 站点部署在 Vercel，函数实例、构建日志、预览环境都能碰到那份环境变量；那个 Worker 只做一件事、只有一个出口、只吐一份有期限的令牌（默认 7 天，`TOKEN_TTL_SECONDS` 可改）。`.p8` 走 `wrangler secret`，Team ID 和 Key ID 不是秘密，放 `[vars]`。
 
@@ -214,7 +214,7 @@ hero 上此刻在播的那首，副标题那一行会跟着进度条换成正在
 
 卡片**不主动**连本机端口。在这台 Mac 上打开 `/local/charging` 才会去连 `http://127.0.0.1:8787/sse/charger` 和 `/sse/powerbank`：端点往 localStorage 写一条记录再跳回首页，这台浏览器以后进站都会连。连上就改用这条约 1 Hz 的本机推流，不再用远端那份；连不上立刻放弃、不重试，远端照旧。
 
-**总功率历史存在服务端**（`lib/charger-store.ts`，SQLite；未配置 SQLite 时退回进程内存）。客户端自己累积的话页面一刷新曲线就没了、还要攒很久才有形状。环形缓冲保留 400 点，两点之间至少间隔 `MIN_SAMPLE_GAP_MS`（当前 5 秒），足以覆盖固定 20 分钟图表窗口。
+**总功率历史存在服务端**（`lib/charger-store.ts`，Worker SQLite；存储不可用时请求失败）。客户端自己累积的话页面一刷新曲线就没了、还要攒很久才有形状。环形缓冲保留 400 点，两点之间至少间隔 `MIN_SAMPLE_GAP_MS`（当前 5 秒），足以覆盖固定 20 分钟图表窗口。
 
 曲线的横坐标**按时间戳映射**而不是按序号等距铺开 —— 漏推一次就会有空档，等距会把那段画得和正常间隔一样宽。
 
@@ -229,8 +229,7 @@ hero 上此刻在播的那首，副标题那一行会跟着进度条换成正在
 - **没有温度字段，上游也不给历史** —— 曲线是本站自己攒的
 
 **充电宝（A110G）** 走完全相同的来路：同一台 Mac 把 BLE 解出来的读数塞进
-`chargingDevices`，本站按 `kind` 挑出来，落在 `lib/powerbank-store.ts`（SQLite 为主、
-进程内存兜底），读取走 `/api/status/powerbank`，卡片是 `components/live/powerbank-card.tsx`，
+`chargingDevices`，本站按 `kind` 挑出来，落在 `lib/powerbank-store.ts`（Worker SQLite 持久化），读取走 `/api/status/powerbank`，卡片是 `components/live/powerbank-card.tsx`，
 本机浏览时同样是打开 `/local/charging` 才直连 `/sse/powerbank`。收卡口径也和充电头一致：上报器离线、或者超过
 `powerBankStaleAfterMs()` 没收到新推送，就把 `connected` 打成 `false`，浏览器不再自己算
 一遍过期。那个窗口和充电头的 `chargerStaleAfterMs` 逐字对齐：默认 90 秒，但也不能短于
@@ -297,21 +296,22 @@ Mac 信封保持这三个模块：
 本站 SQLite 里的累计摘要和每日前五模型不能还原完整逐来源明细。新用量报文要求来源状态和费用完整性，
 旧摘要不作为新协议读取，首份新摘要到达前仍可展示独立上报的限额。
 
-本地端到端回归使用 `scripts/verify-coding-usage.mjs`。先启动连接独立 SQLite 的开发站点，
-显式设置测试用 `REDIS_PREFIX` 与 `TELEMETRY_INGEST_SECRET=local-token-usage-verification`，
-关闭 peers / push，并暂停向该站点写入的上报器。保留默认状态缓存，验证覆盖实际缓存失效链路：
+本地端到端回归使用 `node scripts/verify-ingest-worker.mjs`，脚本启动独立 SQLite Worker，
+自动覆盖用量协议、纯心跳、并发合并和重启持久化。手工运行用量回归时，目标必须是空的本机测试 Worker，
+配置独立 `STORAGE_PREFIX` 与 `TELEMETRY_INGEST_SECRET=local-token-usage-verification`：
 
 ```sh
 node scripts/verify-coding-usage.mjs \
-  --storage-prefix token-usage-dev-20260905 \
-  --snapshot /tmp/lyjw-usage-snapshot.json
+  --ingest http://127.0.0.1:8787 \
+  --base http://localhost:3211 \
+  --storage-prefix token-usage-dev-20260905
 ```
 
-默认只连接 `http://localhost:3211` 和 `storage://127.0.0.1:6389`，可分别用 `--base`、
-`--storage-url` 指定其他本机测试地址；脚本拒绝非本机目标、默认 SQLite 端口和未明确标识为测试的前缀，
-不读取 `.env`。它验证鉴权、旧协议拒绝、仅有限额、未知用量与真实零、重复上报、独立 now 更新、
-非法年度模块不部分写入、371 天整份刷新及旧日上调/下调。结束时恢复原有限额，并上报和读回
-`--snapshot` 指定的 Mac CLI `{ usage, now, year }`；未传文件则留下合成基线。
+脚本拒绝非本机目标和未明确标识为测试的前缀，不读取 `.env`，也不清空已有用量。
+它验证鉴权、旧协议拒绝、仅有限额、未知用量与真实零、重复上报、独立 now 更新、
+非法年度模块不部分写入、371 天整份刷新及旧日上调/下调。可用 `--snapshot` 传入 Mac CLI
+`{ usage, now, year }`，结束后留下该输入或合成基线及测试限额。首屏缓存另由
+`scripts/verify-status-cache.mjs` 在独立测试部署验证，不能对正式站注入测试状态。
 
 ### 各 agent 的限额 — 容器上报器
 
@@ -382,7 +382,7 @@ Authorization: Bearer <TELEMETRY_INGEST_SECRET>
 进度跳变那条触发器不能少：单曲循环时曲名和播放状态都不变，只有进度归零，
 少了它服务端就不知道这首又从头开始了。
 
-接收端复用统一遥测密钥，状态写入 SQLite（未配置时退回进程内存）。`/api/status/listening/now`
+接收端复用统一遥测密钥，状态写入 Worker SQLite（写入成功后才应答）。`/api/status/listening/now`
 按「MacBook 在播 → MacBook 暂停未满 10 秒 → HomePod 在播 → HomePod 暂停未满 10 秒」
 选来源。两个候选在 Worker 每次现读，选择和 `expiresInMs` 每次请求现算，
 所以暂停宽限期到点再问能换到下一首，而不用等 SQLite。事件带有进度观测时间，前端据此自己
@@ -572,8 +572,7 @@ Authorization: Bearer <TELEMETRY_INGEST_SECRET>
 ### 三个上报器共用一套三档
 
 `server-reporter`、`playstation-reporter` 和 `agent-limits-reporter` 按相同人数口径分档，
-限额使用更长间隔（`apple-music-reporter` 从前也在这套里，它已经退役，那份列表改由站点在
-访客的请求里自己拉，见[上面那节](#最近在听--apple-music)）：
+限额使用更长间隔（`apple-music-reporter` 从前也在这套里，它已经退役，那份列表改由 Worker 在有页面连接时刷新，见[上面那节](#最近在听--apple-music)）：
 
 三家每轮问一次 ingest Worker 的 `GET /count`，一次拿到两个数：
 
