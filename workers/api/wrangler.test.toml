@@ -1,4 +1,5 @@
-# 小号 Vercel 专用，命名空间与生产完全独立；没有生产域名或 cron。
+# 独立迁移测试 Worker；小号 Vercel 已切换正式 api，此处不再绑定站点。
+# 命名空间与生产完全独立；没有生产域名或 cron。
 name = "ingest-do-test"
 main = "src/index.ts"
 compatibility_date = "2025-02-14"

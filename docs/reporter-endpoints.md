@@ -1,43 +1,46 @@
 # 生产上报端点核验
 
-2026-09-07（UTC+8）迁移中核验。统一源为 `https://api.homepage.lyjw.llc`。
-下表的成功指真实上报返回 202，并在 Worker 日志中核对来源与中继标记；不是仅凭配置文件判断。
+2026-09-07（UTC+8）核验。统一源为 `https://api.homepage.lyjw.llc`，生产 Worker 名为 `api`。
+所有七个来源均在新 Worker 日志中确认真实 POST 返回 202；HomePod 的两个实例还分别检查了 Home Assistant 动作回执。
 
 | 来源 | 当前实例 | 路径 | 结果 |
 | --- | --- | --- | --- |
-| Mac | 本机 Mac Telemetry Hub | `/api/ingest/mac` | 直连成功 |
-| server | `ssh -J cvm misaka-jp`，`server-reporter.service` | `/api/ingest/server` | 直连成功 |
-| Emby | `ssh dsm`，容器 `homepage-reporter` | `/api/ingest/emby` | 直连成功 |
-| agents | `ssh dsm`，容器 `agent-limits-reporter` | `/api/ingest/agents` | 直连成功 |
-| PlayStation | Worker `playstation-reporter` | `/api/ingest/playstation` | 自动部署后直连成功 |
-| HomePod | `ssh dsm`，Home Assistant `media_player.wo_shi` | `/api/ingest/homepod` | 实际 rest_command 返回 202；当前 off |
-| HomePod | `ssh n100`，Home Assistant `media_player.zhu_wo_lyjw` | `/api/ingest/homepod` | 实际 rest_command 返回 202；当前 idle |
-| iPhone | iPhone 17 Pro，iPhone Telemetry Hub | `/api/ingest/iphone` | 仍指向 `https://lyjw131.com/api/ingest/iphone`，用户选择稍后自行修改 |
+| Mac | 本机 Mac Telemetry Hub | `/api/ingest/mac` | 设置已保存；连续真实上报 202 |
+| server | `ssh -J cvm misaka-jp`，`server-reporter.service` | `/api/ingest/server` | 配置已更新、服务 active；真实上报 202 |
+| Emby | `ssh dsm`，容器 `homepage-reporter` | `/api/ingest/emby` | 容器已应用新配置；真实上报 202 |
+| agents | `ssh dsm`，容器 `agent-limits-reporter` | `/api/ingest/agents` | 容器已应用新配置；真实上报 202 |
+| PlayStation | Worker `playstation-reporter` | `/api/ingest/playstation` | `SITE_URL` 已更新并部署；真实上报 202 |
+| HomePod | `ssh dsm`，Home Assistant `media_player.wo_shi` | `/api/ingest/homepod` | 配置检查通过；真实 rest_command 返回 202 |
+| HomePod | `ssh n100`，Home Assistant `media_player.zhu_wo_lyjw` | `/api/ingest/homepod` | 配置检查通过；真实 rest_command 返回 202 |
+| iPhone | iPhone 17 Pro，遥测中心 | `/api/ingest/iphone` | 用户修改设置；App 显示成功，新 Worker 收到 202 |
 
-iPhone 待完成镜像设置，应改为 `https://api.homepage.lyjw.llc/api/ingest/iphone`，保留原密钥。
-本次未改动手机设置。文档和 App 的地址提示已更新，提示更新不等于已安装 App 的配置迁移。
+两台 Home Assistant 已重启应用配置；验证只调用 `rest_command.push_homepod_now_playing` 上报当前实况，没有控制 HomePod 播放，也没有发送合成数据。
+iPhone 最新活动数据已在生产主页显示为活动 334 / 270 千卡、锻炼 25 / 30 分钟、站立 8 / 10 小时（核验时快照）。
 
-PlayStation 配置提交为 `3cfa634`，部署版本为 `93caea56-d57d-4f39-8c19-f8b01ee0f320`。
-该提交的 CI、CodeQL、Deploy Workers、Vercel 和 EdgeOne 部署均成功。
-本地 PlayStation 类型检查与改动 diff 检查通过；两台 HA 的 check_config 通过。
+## 站点与持久化
 
-本次验证先向 HomePod 入口发送了两个空对象，入口将其接受为 stopped 状态；
-随后分别调用两台 HA 的真实 rest_command，重新上报实际 off / idle 状态并确认 202。
-没有向 HomePod 发出播放控制命令。两台 HA 已重启以应用配置。
+主账号 Vercel 和小账号生产 Vercel 的 Production / Preview `NEXT_PUBLIC_BACKEND_URL` 均为新域名。
+`lyjw.me` 的浏览器状态查询直连新 API，`/ws`、`/online/ws` 均握手 101。
+Worker 的三个 SQLite Durable Object 命名空间通过 transfer migration 迁移，ID 和数据保持不变：
 
-## 配置备份与回滚
+| 类 | 命名空间 ID |
+| --- | --- |
+| LivePushRoom | `7d366bc728244a71b06ce6cbd8267539` |
+| OnlineCounterRoom | `1aa4f5ed35f14a258005da8583342661` |
+| StateHub | `08a6c22e048d4a9b915ba869ad40ffee` |
 
-只修改下列文件的目的地；保留密钥、采集频率、挂载数据和其他服务配置。
-回滚时在对应主机上用 `cp -p <备份> <原路径>` 恢复，再执行该行应用命令。
+本次部署范围仍为海外 Vercel / Workers；国内 EdgeOne 不在验收范围。
 
-| 主机 | 原路径 | 备份后缀 | 应用命令 |
-| --- | --- | --- | --- |
-| dsm | `/volume3/docker/agent-limits-reporter/.env` | `.before-direct-worker-20260906-091948` | `/usr/local/bin/docker compose -f /volume3/docker/agent-limits-reporter/compose.yaml up -d --no-deps --no-build agent-limits-reporter` |
-| dsm | `/volume3/docker/emby-proxy/.env` | `.before-direct-worker-20260906-091948` | `/usr/local/bin/docker compose -f /volume3/docker/emby-proxy/docker-compose.yml up -d --no-deps --no-build emby-reporter` |
-| dsm | `/volume3/docker/homeassistant/homeassistant/configuration.yaml` | `.before-direct-worker-20260906-091948` | `/usr/local/bin/docker restart homeassistant` |
-| n100 | `/volume1/docker/homeassistant/homeassistant/configuration.yaml` | `.before-direct-worker-20260906-092351` | `/usr/local/bin/docker restart homeassistant` |
-| misaka-jp | `/opt/lyjwpage/server-reporter/.env` | `.before-direct-worker-20260906-011951` | `systemctl restart server-reporter` |
+## 配置备份
 
-备份路径是原路径加上对应后缀。Home Assistant 回滚后先运行
-`/usr/local/bin/docker exec homeassistant python -m homeassistant --script check_config --config /config`，
-检查通过再重启。
+每份远端配置修改前均保留原文件权限与时间戳备份，后缀为 `.before-api-20260907`。
+
+| 主机 | 原路径 | 应用命令 |
+| --- | --- | --- |
+| dsm | `/volume3/docker/agent-limits-reporter/.env` | `/usr/local/bin/docker compose -f /volume3/docker/agent-limits-reporter/compose.yaml up -d --no-deps --no-build agent-limits-reporter` |
+| dsm | `/volume3/docker/emby-proxy/.env` | `/usr/local/bin/docker compose -f /volume3/docker/emby-proxy/docker-compose.yml up -d --no-deps --no-build emby-reporter` |
+| dsm | `/volume3/docker/homeassistant/homeassistant/configuration.yaml` | Home Assistant 的 `rest_command.reload` 动作，或重启 `homeassistant` 容器 |
+| n100 | `/volume1/docker/homeassistant/homeassistant/configuration.yaml` | Home Assistant 的 `rest_command.reload` 动作，或重启 `homeassistant` 容器 |
+| misaka-jp | `/opt/lyjwpage/server-reporter/.env` | `systemctl restart server-reporter` |
+
+备份路径是原路径加上述后缀。原 Worker / 域名退役后，不要单独恢复备份中的旧目的地；如需整体回滚，先恢复后端域名与服务，再切换调用方。
