@@ -1,4 +1,4 @@
-import { writeLiveness } from "@ingest/stores/reporter-liveness";
+import { writeLiveness } from "@api/stores/reporter-liveness";
 import assert from "node:assert/strict";
 import test from "node:test";
 

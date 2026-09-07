@@ -1,4 +1,4 @@
-name = "ingest"
+name = "api"
 main = "src/index.ts"
 compatibility_date = "2025-02-14"
 # Node 兼容用于 AsyncLocalStorage、crypto；process.env 为共用读写工具提供配置。
@@ -7,7 +7,7 @@ workers_dev = true
 
 # 只有这一个域名：站点的两条 WebSocket、上报器的上报和 /count 都从它拼路径。
 routes = [
-  { pattern = "ingest.homepage.lyjw.llc", custom_domain = true }
+  { pattern = "api.homepage.lyjw.llc", custom_domain = true }
 ]
 
 [vars]
@@ -34,14 +34,7 @@ class_name = "LivePushRoom"
 name = "ONLINE_COUNTER"
 class_name = "OnlineCounterRoom"
 
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["LivePushRoom"]
 
-# 从 online-counter worker 并进来的房间；迁移只能追加，别改 v1
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["OnlineCounterRoom"]
 
 # 上报器直传图片的那个桶。这里只 HEAD，回执告诉上报器哪些图还没到
 [[r2_buckets]]
@@ -60,6 +53,22 @@ crons = ["* * * * *"]
 name = "STATE"
 class_name = "StateHub"
 
+
+# 将原 ingest 的三个 SQLite 命名空间整体转移，保留对象 ID 与全部数据。
 [[migrations]]
-tag = "v3"
-new_sqlite_classes = ["StateHub"]
+tag = "v1-transfer-from-ingest"
+
+[[migrations.transferred_classes]]
+from = "LivePushRoom"
+from_script = "ingest"
+to = "LivePushRoom"
+
+[[migrations.transferred_classes]]
+from = "OnlineCounterRoom"
+from_script = "ingest"
+to = "OnlineCounterRoom"
+
+[[migrations.transferred_classes]]
+from = "StateHub"
+from_script = "ingest"
+to = "StateHub"

@@ -288,7 +288,7 @@ function nonNegativeCount(value: unknown): number {
 }
 
 /**
- * 问 ingest Worker 要两个人头数（一次请求，`online` 可见、`connections` 开着）。
+ * 问 API Worker 要两个人头数（一次请求，`online` 可见、`connections` 开着）。
  * 超时、非 200、形状不对，一律当 0。
  *
  * 这个兜底方向是单向的：读不到只会让节奏往慢里退，永远不会因为故障变快 ——
@@ -339,7 +339,7 @@ type Gate = {
 async function shouldTick(env: Env): Promise<Gate> {
   const lastAt = Math.max(await readFullTickStartedAt(env.STATE), lastFullTickAt);
   const sinceMs = lastAt > 0 ? Date.now() - lastAt : Number.POSITIVE_INFINITY;
-  // 攒够闲档就必跑，不必再问人数：闲时节奏不该依赖 ingest Worker 可不可达
+  // 攒够闲档就必跑，不必再问人数：闲时节奏不该依赖 API Worker 可不可达
   if (sinceMs >= IDLE_TICK_INTERVAL_MS) return { run: true, sinceMs, online: null, open: null };
   if (sinceMs < LIVE_TICK_INTERVAL_MS) return { run: false, sinceMs, online: null, open: null };
 

@@ -11,7 +11,7 @@ import {
   normalizeVibeCodingNow,
   normalizeVibeCodingUsage
 } from "@/lib/vibecoding-parse";
-import { fanout } from "@ingest/fanout";
+import { fanout } from "@api/fanout";
 import { limitsMirror, nowMirror, usageMirror } from "@shared/vibecoding";
 
 /**

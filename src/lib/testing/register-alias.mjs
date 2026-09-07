@@ -14,14 +14,14 @@ const SRC_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const EXTENSIONS = ["", ".ts", ".tsx", ".mts", ".mjs", ".js", ".json"];
 
 function resolveAlias(specifier, context, nextResolve) {
-  if (!["@/", "@shared/", "@ingest/"].some((prefix) => specifier.startsWith(prefix))) {
+  if (!["@/", "@shared/", "@api/"].some((prefix) => specifier.startsWith(prefix))) {
     return nextResolve(specifier, context);
   }
 
   const base = specifier.startsWith("@shared/")
     ? path.join(SRC_ROOT, "../shared", specifier.slice(8))
-    : specifier.startsWith("@ingest/")
-      ? path.join(SRC_ROOT, "../workers/ingest/src", specifier.slice(8))
+    : specifier.startsWith("@api/")
+      ? path.join(SRC_ROOT, "../workers/api/src", specifier.slice(5))
       : path.join(SRC_ROOT, specifier.slice(2));
   for (const extension of EXTENSIONS) {
     const candidate = base + extension;

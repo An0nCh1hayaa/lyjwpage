@@ -5,7 +5,7 @@ export interface Env {
   PLAYED_GAMES_LIMIT?: string;
   /** 逗号或空白分隔的 titleId（PPSA… / CUSA…），不上报、不占最近窗口。 */
   PLAYSTATION_HIDDEN_TITLE_IDS?: string;
-  /** ingest Worker 的**源**：上报拼 `/api/ingest/playstation`，人头数拼 `/count`。 */
+  /** API Worker 的**源**：上报拼 `/api/ingest/playstation`，人头数拼 `/count`。 */
   SITE_URL?: string;
   SITE_INGEST_URL?: string;
   PSN_NPSSO?: string;
@@ -70,7 +70,7 @@ export function isDryRun(env: Env): boolean {
 }
 
 /**
- * 两个人头数的读取地址：ingest Worker 的 `/count` 一次回答 `online`（此刻**可见**
+ * 两个人头数的读取地址：API Worker 的 `/count` 一次回答 `online`（此刻**可见**
  * 的页面）和 `connections`（**开着**的页面，含后台标签页、锁了屏的手机）。站点侧
  * use-online-count 在页面不可见时把连接整条关掉，use-live-events 那条不关。
  *

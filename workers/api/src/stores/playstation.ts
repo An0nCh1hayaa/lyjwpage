@@ -5,8 +5,8 @@ import { normalizeTrophies, trophiesContent } from "@/lib/trophies";
 import type {
   PlaystationPresencePayload
 } from "@/lib/types";
-import { fanout, type PendingEvent } from "@ingest/fanout";
-import { setPlaystationPlayedGames, setPlaystationPresence, setPlaystationTrophies } from "@ingest/stores/playstation-store";
+import { fanout, type PendingEvent } from "@api/fanout";
+import { setPlaystationPlayedGames, setPlaystationPresence, setPlaystationTrophies } from "@api/stores/playstation-store";
 import { normalizePlaystationPlayedGames, normalizePlaystationPresence } from "@shared/playstation";
 
 /** observedAt 是采集时刻，不参与“内容有没有变化”的判断。 */

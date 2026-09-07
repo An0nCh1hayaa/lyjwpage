@@ -50,9 +50,9 @@ jobs:
             names=$(ls workers)
           else
             names=$(git diff --name-only "$before" "$GITHUB_SHA" -- workers/ | cut -d/ -f2 | sort -u)
-            # ingest 直接打包共享 store；只改主站目录也必须同步发布写侧。
+            # api 直接打包共享 store；只改主站目录也必须同步发布写侧。
             if git diff --name-only "$before" "$GITHUB_SHA" -- src/lib/ shared/ tsconfig.json package.json pnpm-lock.yaml | awk 'END { exit NR == 0 }'; then
-              names=$(printf '%s\ningest\n' "$names" | sort -u)
+              names=$(printf '%s\napi\n' "$names" | sort -u)
             fi
           fi
           # 被整个删掉的 worker 也会出现在 diff 里，目录已不存在就不进矩阵——
@@ -76,16 +76,16 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
-        if: matrix.worker == 'ingest'
+        if: matrix.worker == 'api'
 
       - uses: actions/setup-node@v4
-        if: matrix.worker == 'ingest'
+        if: matrix.worker == 'api'
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install shared store dependencies
-        if: matrix.worker == 'ingest'
+        if: matrix.worker == 'api'
         run: pnpm install --frozen-lockfile
 
       # 大多数 worker 没有运行时依赖；PlayStation 上报器依赖 psn-api，

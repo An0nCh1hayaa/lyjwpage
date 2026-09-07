@@ -11,7 +11,7 @@ import { resolve, join } from 'node:path';
 import { createRequire } from 'node:module';
 
 const root = resolve(import.meta.dirname, '..');
-const require = createRequire(join(root, 'workers/ingest/package.json'));
+const require = createRequire(join(root, 'workers/api/package.json'));
 const temporary = await mkdtemp(join(tmpdir(), 'lyjw-ingest-'));
 const children = [];
 const logs = [];
@@ -48,10 +48,10 @@ try {
   };
   // Config lives outside the checkout so Wrangler cannot load real .dev.vars or production bindings.
   const config = {
-    name: 'isolated-ingest', main: join(root, 'workers/ingest/src/index.ts'),
+    name: 'isolated-ingest', main: join(root, 'workers/api/src/index.ts'),
     compatibility_date: '2025-02-14', compatibility_flags: ['nodejs_compat', 'nodejs_compat_populate_process_env'],
     vars,
-    alias: Object.fromEntries(['storage-driver'].map(name => [`@/lib/${name}`, join(root, `workers/ingest/src/${name}.ts`)])),
+    alias: Object.fromEntries(['storage-driver'].map(name => [`@/lib/${name}`, join(root, `workers/api/src/${name}.ts`)])),
     durable_objects: { bindings: [
       { name: 'LIVE_PUSH', class_name: 'LivePushRoom' },
       { name: 'ONLINE_COUNTER', class_name: 'OnlineCounterRoom' },

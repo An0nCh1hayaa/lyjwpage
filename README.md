@@ -49,7 +49,7 @@ Vercel 没有状态 API 转发或私有存储读取端点。聚合快照只包�
 
 首屏使用 `use cache`：stale 5 分钟、revalidate 10 分钟、expire 7 天。内容变化按 `page:<tag>` 标记 stale，已有 HTML 先返回，更新在后台执行。纯心跳只续 SQLite 中的存活时间，不触发首屏失效；实时查询按当前时间判定新鲜度。
 
-`shared/` 保存存储契约和共用计算，`workers/ingest/src/routes/` 提供公开 API。202 应答前确认持久化成功，之后使用 `waitUntil` 广播和通知 Vercel。上报在 StateHub 中串行合并，每个请求拥有独立工作副本。SQL 批次使用事务，定时清理过期数据。
+`shared/` 保存存储契约和共用计算，`workers/api/src/routes/` 提供公开 API。202 应答前确认持久化成功，之后使用 `waitUntil` 广播和通知 Vercel。上报在 StateHub 中串行合并，每个请求拥有独立工作副本。SQL 批次使用事务，定时清理过期数据。
 
 发布和迁移步骤见 [状态存储架构](docs/state-storage.md)。本次仅验收海外 Vercel / Workers，国内平台不在本次发布范围。
 
@@ -132,13 +132,13 @@ Apple Music 的封面没有代理，仍走 `mzstatic.com` 直链 —— 那本�
 
 ### 最近在听 — Apple Music
 
-列表由 ingest Worker 请求 `/v1/me/recent/played`（`workers/ingest/src/apple-music-recent.ts`），写入 SQLite 后推送浏览器并使站点缓存失效。
+列表由 API Worker 请求 `/v1/me/recent/played`（`workers/api/src/apple-music-recent.ts`），写入 SQLite 后推送浏览器并使站点缓存失效。
 
 **为什么当时要一个常驻进程。** 因为那时这份列表还兼着推断「此刻在不在听」：Apple 没有可查的当前播放接口，只能连续盯着列表里排第一的那项什么时候换人，再对照容器总时长猜它有没有播完。连续观测这件事在 serverless 上做不了——状态存在进程内存里，每个实例各有一份、活不到下一次切换。**那个推断已经撤掉了**，于是常驻的理由也没了。
 
 **为什么撤掉它。** 它只在 Mac 和 HomePod 同时没声时才可能露面（有实况就以实况为准），而那正是它最没把握的时候：一直循环同一张专辑时第一项不变，会被当成已经停了；只听了一首就走开，仍按整张时长算，能一直显示在听；停下来但没换过东西的情况根本分辨不出来。卡片上那枚 `inferred` 角标就是在说「这一句我也不确定」。**现在「在不在播」只认设备实况**，这份列表只回答「听过什么」。
 
-刷新由 ingest Worker 驱动：WebSocket 建立时检查，cron 每分钟在有存活连接时检查一次；SQLite 两分钟闸门限制真正的拉取。无人连接时不拉取。新列表通过 Worker 推送和缓存失效送到页面，状态 GET 只读取已写入的数据。
+刷新由 API Worker 驱动：WebSocket 建立时检查，cron 每分钟在有存活连接时检查一次；SQLite 两分钟闸门限制真正的拉取。无人连接时不拉取。新列表通过 Worker 推送和缓存失效送到页面，状态 GET 只读取已写入的数据。
 
 TTL 定在分钟级不是为了「在听」的精度（那个已经没有了），是为了 hero 那条取色带：实时播放的封面配色是拿当前专辑 ID 去这份列表里借的，刚开播的那张要等它进了列表才有颜色可借。两分钟落在一首歌之内。
 
@@ -296,7 +296,7 @@ Mac 信封保持这三个模块：
 本站 SQLite 里的累计摘要和每日前五模型不能还原完整逐来源明细。新用量报文要求来源状态和费用完整性，
 旧摘要不作为新协议读取，首份新摘要到达前仍可展示独立上报的限额。
 
-本地端到端回归使用 `node scripts/verify-ingest-worker.mjs`，脚本启动独立 SQLite Worker，
+本地端到端回归使用 `node scripts/verify-api-worker.mjs`，脚本启动独立 SQLite Worker，
 自动覆盖用量协议、纯心跳、并发合并和重启持久化。手工运行用量回归时，目标必须是空的本机测试 Worker，
 配置独立 `STORAGE_PREFIX` 与 `TELEMETRY_INGEST_SECRET=local-token-usage-verification`：
 
@@ -367,7 +367,7 @@ POST /api/ingest/mac
 
 各模块的指纹粒度决定了「无变化」有多容易达成：`chargingDevices`（充电头和充电宝在同一个列表里）含功率/电压/电流，充电中几乎每轮都变；`desktop` 是应用名 + bundleID + 图标，不切应用就不变；`appleMusic` 的进度**不入签名**，所以播放中也不变，只有 seek 偏离锚点超过容差才算；`timezone` 只有 IANA 标识、当前 UTC 偏移或缩写变化时才重发；三个 vibe coding 模块各看自己那份载荷有没有变，`vibeCodingUsage` 带着采集时刻所以每轮必发，`vibeCodingNow` 在没动过键盘的那些轮次里一动不动。真正的零 telemetry 场景是充电头和充电宝都没动静（没在充也没在放）、不切前台应用、音乐不换曲不 seek、时区不变、vibe coding 采集器未刷新——此时只有每 30 秒一条空 `modules` 的心跳。
 
-前台应用图标由 Mac 一次缩放成 96px PNG（系统原生编码，不依赖任何外部二进制）并直传 R2，网站只接收对象键 `<sha256>.png`、HEAD 确认后组出公开直链。**没有服务端接收图片二进制的回退**：`iconData` 一旦出现在信封里就直接报错。`iconHash` 标识「哪个应用的图标」（应用有图标就非空，编码或上传失败也照样有），对象键标识「哪份字节」，两者分开才能让站点回执区分「这个应用没图标」和「图标还没准备好」——从前它们是同一个哈希，编码一失败就静默丢图、永不重试。状态里只存公开直链，普通状态心跳不会重复携带图片。时区模块只上传 IANA 标识、当前偏移和缩写，不上传地址。时区只进首屏，没有 status 端点。公开读取按用途拆开，以 `workers/ingest/src/routes/status/` 下的目录为准：`/api/status/desktop`、`/api/status/charger`、`/api/status/powerbank`、`/api/status/listening`、`/api/status/listening/now`、`/api/status/watching`、`/api/status/watching/now`、`/api/status/playing`、`/api/status/playing/now`、`/api/status/trophies`、`/api/status/vibecoding`、`/api/status/vibecoding/year`、`/api/status/activity`、`/api/status/server`、`/api/status/github-chart`。活动圆环来自 iPhone Telemetry Hub（见下面那节），落地节点那条来自节点上的上报器（`reporters/server-reporter`），最后那条不由任何上报器喂，是 Worker 去 GitHub GraphQL 取的（所以它是唯一不参与 tag 失效的一条 —— 同样自己拉的「最近在听」参与，因为它落库、有 tag、也推），其余都对应上面某个模块。
+前台应用图标由 Mac 一次缩放成 96px PNG（系统原生编码，不依赖任何外部二进制）并直传 R2，网站只接收对象键 `<sha256>.png`、HEAD 确认后组出公开直链。**没有服务端接收图片二进制的回退**：`iconData` 一旦出现在信封里就直接报错。`iconHash` 标识「哪个应用的图标」（应用有图标就非空，编码或上传失败也照样有），对象键标识「哪份字节」，两者分开才能让站点回执区分「这个应用没图标」和「图标还没准备好」——从前它们是同一个哈希，编码一失败就静默丢图、永不重试。状态里只存公开直链，普通状态心跳不会重复携带图片。时区模块只上传 IANA 标识、当前偏移和缩写，不上传地址。时区只进首屏，没有 status 端点。公开读取按用途拆开，以 `workers/api/src/routes/status/` 下的目录为准：`/api/status/desktop`、`/api/status/charger`、`/api/status/powerbank`、`/api/status/listening`、`/api/status/listening/now`、`/api/status/watching`、`/api/status/watching/now`、`/api/status/playing`、`/api/status/playing/now`、`/api/status/trophies`、`/api/status/vibecoding`、`/api/status/vibecoding/year`、`/api/status/activity`、`/api/status/server`、`/api/status/github-chart`。活动圆环来自 iPhone Telemetry Hub（见下面那节），落地节点那条来自节点上的上报器（`reporters/server-reporter`），最后那条不由任何上报器喂，是 Worker 去 GitHub GraphQL 取的（所以它是唯一不参与 tag 失效的一条 —— 同样自己拉的「最近在听」参与，因为它落库、有 tag、也推），其余都对应上面某个模块。
 
 ### HomePod mini 播放实况
 
@@ -416,13 +416,13 @@ payload 带一个 `expiresInMs`，由浏览器把下一次取数排在到期那�
 
 推送来自两台 Home Assistant：`ssh dsm` 上的 `media_player.wo_shi`，以及
 `ssh n100` 上的 `media_player.zhu_wo_lyjw`。两台都直连
-`https://ingest.homepage.lyjw.llc/api/ingest/homepod`，使用相同契约。
+`https://api.homepage.lyjw.llc/api/ingest/homepod`，使用相同契约。
 当前核验与回滚记录见 [上报端点核验](docs/reporter-endpoints.md)。
 
 `rest_command.push_homepod_now_playing` 的形状（`<E>` 换成对应实体）：
 
 ```yaml
-url: "https://ingest.homepage.lyjw.llc/api/ingest/homepod"
+url: "https://api.homepage.lyjw.llc/api/ingest/homepod"
 method: post
 content_type: "application/json"
 headers:
@@ -574,7 +574,7 @@ Authorization: Bearer <TELEMETRY_INGEST_SECRET>
 `server-reporter`、`playstation-reporter` 和 `agent-limits-reporter` 按相同人数口径分档，
 限额使用更长间隔（`apple-music-reporter` 从前也在这套里，它已经退役，那份列表改由 Worker 在有页面连接时刷新，见[上面那节](#最近在听--apple-music)）：
 
-三家每轮问一次 ingest Worker 的 `GET /count`，一次拿到两个数：
+三家每轮问一次 API Worker 的 `GET /count`，一次拿到两个数：
 
 | 问到什么 | server / PlayStation | agent limits |
 | --- | --- | --- |
@@ -588,7 +588,7 @@ Authorization: Bearer <TELEMETRY_INGEST_SECRET>
 那一下不该看见一刻钟前的数字，又不值得按可见那档一直打上游。
 
 读不到（超时、非 200、形状不对、没配 `SITE_URL`）一律当 0：**兜底方向是单向的**，只会往
-慢里退，永远不会因为故障变快。人头数读的就是上报那同一个源。ingest Worker 一份生产一个，
+慢里退，永远不会因为故障变快。人头数读的就是上报那同一个源。API Worker 一份生产一个，
 三家读的都是 Vercel 那一份，国内那份生产上开着的页面因此不进判断 —— 少数了同样只会更慢。
 
 `server-reporter` 和 `agent-limits-reporter` 是常驻进程，长档拆成一个个快档长度的小觉，

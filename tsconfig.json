@@ -30,8 +30,8 @@
       "@shared/*": [
         "./shared/*"
       ],
-      "@ingest/*": [
-        "./workers/ingest/src/*"
+      "@api/*": [
+        "./workers/api/src/*"
       ]
     }
   },

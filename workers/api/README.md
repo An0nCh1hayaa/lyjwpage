@@ -1,4 +1,4 @@
-# ingest
+# API 中枢
 
 所有上报器直连此 Worker。它负责鉴权、解析、写 SQLite、广播 WebSocket 和通知 Vercel 缓存失效。
 站点没有上报路由、rewrite、中继和事件发布逻辑。当前只覆盖 Vercel，国内侧另行设计。
@@ -53,27 +53,31 @@ Mac 上报的 Apple Music 凭据保存在 SQLite，Worker 读取使用，不向�
 状态和凭据只存于 Worker 的 StateHub，Vercel 不连接数据库。秘密通过以下命令配置：
 
 ```sh
-pnpm --dir workers/ingest exec wrangler secret put GITHUB_TOKEN
-pnpm --dir workers/ingest exec wrangler secret put TELEMETRY_INGEST_SECRET
+pnpm --dir workers/api exec wrangler secret put GITHUB_TOKEN
+pnpm --dir workers/api exec wrangler secret put TELEMETRY_INGEST_SECRET
 ```
 
-站点配置 `NEXT_PUBLIC_BACKEND_URL=https://ingest.homepage.lyjw.llc` 与相同的
+站点配置 `NEXT_PUBLIC_BACKEND_URL=https://api.homepage.lyjw.llc` 与相同的
 `TELEMETRY_INGEST_SECRET`；浏览器由这一个源拼 `/ws` 和 `/online/ws`。所有上报器的目标为
-这个 Worker 的 `/api/ingest/<来源>`，不经过站点，调频读的也是同一个源的 `/count`。实例清单见 [端点核验记录](../../docs/reporter-endpoints.md)；iPhone 地址由用户自行修改。
+这个 Worker 的 `/api/ingest/<来源>`，不经过站点，调频读的也是同一个源的 `/count`。实例清单见 [端点核验记录](../../docs/reporter-endpoints.md)。
 
 提交并推送 main，由 `.github/workflows/deploy-workers.yml` 自动部署。
-`shared/`、共用 `src/lib/`、根依赖及路径配置变化也触发 ingest 部署。
+`shared/`、共用 `src/lib/`、根依赖及路径配置变化也触发 api 部署。
 
 ## 验证
 
 ```sh
-pnpm --dir workers/ingest typecheck
-pnpm --dir workers/ingest test
+pnpm --dir workers/api typecheck
+pnpm --dir workers/api test
 pnpm build
-node scripts/verify-ingest-worker.mjs
+node scripts/verify-api-worker.mjs
 ```
 
 集成脚本启动隔离 SQLite、Worker 和缓存通知测试服务器，检查鉴权、404、写入、缓存失效、两条真实 WebSocket
 和 `/count` 的两个数，退出时清理临时状态。不要在本地开发配置中使用生产 SQLite。
 
 SQLite 初始化、迁移与权限见 [后端架构](../../docs/state-storage.md)。
+
+## Worker 更名
+
+生产服务为 `api`，域名 `api.homepage.lyjw.llc`。`v1-transfer-from-ingest` 将旧 Worker 的三个 SQLite Durable Object 命名空间整体转移，保持 ID 与数据不变；后续部署保留这条迁移记录。不要对这些类另加创建或删除迁移。

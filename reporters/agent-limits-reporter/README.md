@@ -28,7 +28,7 @@ PlayStation 上报器采用同款人数分档逻辑，限额使用自己的 5 / 
 
 长档每 5 分钟重查人数，发现更快档立即采集；人数减少不延后已经定好的下一轮。
 只查公开计数口，不带 ingest 密钥，也不在这些检查里访问厂商限额接口。
-ingest Worker 一份生产一个，`SITE_URL` 填 Vercel 那份，国内生产的后台连接不计入，少计只会减速。
+API Worker 一份生产一个，`SITE_URL` 填 Vercel 那份，国内生产的后台连接不计入，少计只会减速。
 
 默认发 `claude` / `codex` / `grok` / `cursor` / `antigravity`。一家失败只影响那一行。
 
@@ -38,7 +38,7 @@ ingest Worker 一份生产一个，`SITE_URL` 填 Vercel 那份，国内生产�
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://ingest.homepage.lyjw.llc`。上报端点和人头数的 `/count` 都由上报器从它拼 |
+| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://api.homepage.lyjw.llc`。上报端点和人头数的 `/count` 都由上报器从它拼 |
 | `SITE_INGEST_URL` | | 直接给完整端点，给了就不用 `SITE_URL` 上报；人头数仍只从 `SITE_URL` 读 |
 | `TELEMETRY_INGEST_SECRET` | ✅ | 和站点同名变量对上，作 Bearer 鉴权。站点没配时才可留空 |
 | `LIVE_INTERVAL_MS` | | 默认 `300000`（5 分钟），有可见页面；也是长档重查人数的间隔 |

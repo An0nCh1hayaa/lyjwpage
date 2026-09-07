@@ -10,12 +10,12 @@ export const ONLINE_COUNT_KEY = "worker:online-count";
 export const ONLINE_CONNECTED_KEY = "worker:online-connected";
 
 /*
- * 连的是 ingest Worker 的 /online/ws（和事件推送同一个源，见 lib/live-socket）。
+ * 连的是 API Worker 的 /online/ws（和事件推送同一个源，见 lib/live-socket）。
  * 那个 Worker 的 /count 站点不用（只走长连接这条），但它不是闲置口 —— 三个上报器
- * 读它定上报节奏，`online` 那个数就是这条连接的口径，见 workers/ingest/README.md。
+ * 读它定上报节奏，`online` 那个数就是这条连接的口径，见 workers/api/README.md。
  *
  * 心跳 30 秒（下面 heartbeatTimer）被 Worker 的清扫阈值手抄了一份
- * （workers/ingest/src/online-counter.ts 的 HEARTBEAT_INTERVAL_MS），改一边必须改另一边。
+ * （workers/api/src/online-counter.ts 的 HEARTBEAT_INTERVAL_MS），改一边必须改另一边。
  */
 
 let socket: WebSocket | null = null;

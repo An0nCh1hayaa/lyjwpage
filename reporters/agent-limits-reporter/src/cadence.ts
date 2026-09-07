@@ -9,7 +9,7 @@ type HeadCounts = { online: number; connections: number };
 const NOBODY: HeadCounts = { online: 0, connections: 0 };
 
 /**
- * ingest Worker 的 `/count` 一次回答两个数：`online` 是此刻可见的页面，
+ * API Worker 的 `/count` 一次回答两个数：`online` 是此刻可见的页面，
  * `connections` 是开着的页面（含后台标签页）。公开计数口不带 ingest 凭据；
  * 读不到只向慢档退，不影响限额采集和心跳。
  */

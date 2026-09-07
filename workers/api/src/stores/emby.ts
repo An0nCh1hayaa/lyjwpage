@@ -2,9 +2,9 @@ import { getCurrentItem, getImageObjectKeys, getResume, resolveNowPlaying, type 
 import { number, object, text } from "@/lib/json";
 import { NOW_WATCHING_TAG, WATCHING_TAG } from "@/lib/live-events";
 import type { WatchingItem } from "@/lib/types";
-import { fanout, type PendingEvent } from "@ingest/fanout";
-import { hasStoredImage, IMAGE_OBJECT_KEY } from "@ingest/r2-assets";
-import { clearNowPlaying, setCurrentItem, setImageObjectKeys, setNowPlaying, setResume } from "@ingest/stores/emby-store";
+import { fanout, type PendingEvent } from "@api/fanout";
+import { hasStoredImage, IMAGE_OBJECT_KEY } from "@api/r2-assets";
+import { clearNowPlaying, setCurrentItem, setImageObjectKeys, setNowPlaying, setResume } from "@api/stores/emby-store";
 import { nowWatchingPayload, watchingPayload } from "@shared/emby";
 
 /**

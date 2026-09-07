@@ -18,7 +18,7 @@ function authorized(request: Request, expected: string) {
 /**
  * Worker 处理完一次上报之后，让这份部署的 `'use cache'` 过期。
  *
- * 写入已经不在这个进程里发生了（落库、推送都在 workers/ingest），但 `revalidateTag`
+ * 写入已经不在这个进程里发生了（落库、推送都在 workers/api），但 `revalidateTag`
  * 只能在 Next 进程内调 —— 所以要留这一个口子。它只传 tag 名，不传数据：数据早就
  * 在 SQLite 里了，下一次读自己会去拿。请求体的形状和校验见 lib/revalidate-request。
  *

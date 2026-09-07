@@ -1,7 +1,7 @@
 import { workerUrl } from "@/lib/worker-url";
 
 /**
- * 浏览器直连 ingest Worker 的两条 WebSocket；站点不发布事件。
+ * 浏览器直连 API Worker 的两条 WebSocket；站点不发布事件。
  *
  * 只配一个源，路径在这儿拼。`process.env.X` 是构建时按文本替换的，只有写成完整
  * 字面量才替换得到，所以两处各自读、不抽成参数。

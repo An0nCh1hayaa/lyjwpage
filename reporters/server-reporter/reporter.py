@@ -23,7 +23,7 @@ from typing import Any
 
 # 三档节奏。这份快照每轮必发（它本身就是心跳），30 秒一轮时它是站点函数调用量
 # 最大的一条路径 —— 实测 12 小时 1.5K 次。而这些数字只在有人看的时候才有人看，
-# 所以每轮收尾问一次 ingest Worker 的 /count，拿到两个数，据此决定下一轮多久：
+# 所以每轮收尾问一次 API Worker 的 /count，拿到两个数，据此决定下一轮多久：
 #
 #   有人正看着（`online`，只数**可见**的页面）                      → 60 秒
 #   页面开着但都在后台（`connections`，数**开着**的连接）           → 2 分钟
@@ -89,11 +89,11 @@ def ingest_url() -> str:
 
 
 def count_url() -> str:
-    """ingest Worker 的 /count，和上报同一个源，路径这边拼 —— 和站点侧的
+    """API Worker 的 /count，和上报同一个源，路径这边拼 —— 和站点侧的
     NEXT_PUBLIC_LIVE_PUSH_URL、另外两个上报器同一个形状。只配了 SITE_INGEST_URL
     没配 SITE_URL 就读不到，两个数恒为 0。
 
-    ingest Worker 是**一份生产一个**，这里填的是 Vercel 那一份，所以国内那份生产上
+    API Worker 是**一份生产一个**，这里填的是 Vercel 那一份，所以国内那份生产上
     开着的后台页面数不进这个判断。少数了只会让节奏往慢里退，和读不到时同一个
     方向，不会误提速。
     """
@@ -444,7 +444,7 @@ def push(payload: dict[str, Any]) -> None:
 
 
 def head_counts() -> tuple[int, int]:
-    """问 ingest Worker 要两个人头数 (可见, 开着)。读不到一律当 0，节奏只会因此往慢里退。"""
+    """问 API Worker 要两个人头数 (可见, 开着)。读不到一律当 0，节奏只会因此往慢里退。"""
     url = CONFIG["count_url"]
     # 没配那个变量不是故障，别让它进 failure 的连击计数
     if not url:
@@ -478,7 +478,7 @@ def wait_for_next_round(stopping: "Callable[[], bool]") -> None:
     长档不是一觉睡满：拆成一个个快档长度的小觉，每觉醒来重新问一次人头数，
     该走更快那档了就立刻回去开跑。否则「从没人到有人正看着」最坏要等满一个慢档
     （15 分钟），而那正是有人盯着屏幕等的那一刻。多打的那几次是自家的
-    ingest Worker，不是这台机器的 /proc。
+    API Worker，不是这台机器的 /proc。
     """
     delay = next_delay()
     deadline = time.time() + delay

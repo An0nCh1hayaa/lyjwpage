@@ -1,7 +1,7 @@
 import { displayChanged } from "@shared/display-change";
 import { SERVER_TAG } from "@/lib/live-events";
 import { normalizeServer } from "@/lib/server-parse";
-import { fanout } from "@ingest/fanout";
+import { fanout } from "@api/fanout";
 import { mirror } from "@shared/server";
 
 /**

@@ -10,7 +10,7 @@ import type {
   PowerBankPayload,
 } from "@/lib/types";
 
-/** Worker → 浏览器的事件契约。发布实现仅在 workers/ingest/src/fanout.ts。 */
+/** Worker → 浏览器的事件契约。发布实现仅在 workers/api/src/fanout.ts。 */
 
 /**
  * 前台应用和播放拆成独立事件。播放来源可能是 MacBook 也可能是 HomePod，
@@ -64,7 +64,7 @@ export type LiveEvent =
    * 单独成一种事件，而不是借 desktop / listening 推：前端要能分清「上报器
    * 离线了」和「前台应用变了」，而且需要知道离线的不止那两张卡。
    *
-   * 唯一的发出点是 workers/ingest/src/stores/telemetry 的 recordTelemetryEnvelope（存活只在那里翻转），
+   * 唯一的发出点是 workers/api/src/stores/telemetry 的 recordTelemetryEnvelope（存活只在那里翻转），
    * 走 fanout 的 `notify` 那半 —— 它不带数据，浏览器收到就回源，所以必须排在写
    * 后面，理由见下面 fanout 的规则 2。浏览器那侧重取的是 PRESENCE_PATHS 那三份
    * （desktop / listening-now / charger）：时区不看存活；vibe coding 那张刻意不订阅，

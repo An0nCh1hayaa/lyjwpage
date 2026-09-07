@@ -37,7 +37,7 @@ webhook 各版本的字段位置本来就不一致，用它带的值等于把版
 | `EMBY_URL` | ✅ | 内网地址，如 `http://emby.local:8096` |
 | `EMBY_API_KEY` | ✅ | Emby 后台「高级 → API 密钥」 |
 | `EMBY_USER_ID` | ✅ | 要跟的那个用户；别人在看什么不会被推出去 |
-| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://ingest.homepage.lyjw.llc`。端点路径由上报器自己拼 |
+| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://api.homepage.lyjw.llc`。端点路径由上报器自己拼 |
 | `SITE_INGEST_URL` | | 直接给完整端点，给了就不用 `SITE_URL` |
 | `TELEMETRY_INGEST_SECRET` | ✅ | 和站点同名变量对上，作 Bearer 鉴权。站点没配时才可留空 |
 | `R2_ENDPOINT` | ✅ | R2 S3 API 地址，如 `https://<account>.r2.cloudflarestorage.com` |
@@ -89,7 +89,7 @@ ssh nas-host '/usr/local/bin/docker compose -f /srv/lyjwpage/emby-reporter/compo
 （`docker` 不在群晖的非交互 PATH 里，得写绝对路径。`-f` 指到哪个文件，compose 就拿
 那个目录当项目目录 —— `.env` 和项目名都从那儿取，不会和 NAS 上别的 compose 项目串。）
 
-生产的 `SITE_URL` 统一填 `https://ingest.homepage.lyjw.llc`，不经 Vercel 或 EdgeOne 站点。
+生产的 `SITE_URL` 统一填 `https://api.homepage.lyjw.llc`，不经 Vercel 或 EdgeOne 站点。
 
 不进容器直接跑也行（Node ≥ 20），在仓库根目录：
 `pnpm --filter @lyjwpage/emby-reporter build && node reporters/emby-reporter/dist/index.js`。

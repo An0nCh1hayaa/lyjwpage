@@ -1,6 +1,6 @@
 # 生产上报端点核验
 
-2026-09-06（UTC+8）核验。统一源为 `https://ingest.homepage.lyjw.llc`。
+2026-09-07（UTC+8）迁移中核验。统一源为 `https://api.homepage.lyjw.llc`。
 下表的成功指真实上报返回 202，并在 Worker 日志中核对来源与中继标记；不是仅凭配置文件判断。
 
 | 来源 | 当前实例 | 路径 | 结果 |
@@ -14,7 +14,7 @@
 | HomePod | `ssh n100`，Home Assistant `media_player.zhu_wo_lyjw` | `/api/ingest/homepod` | 实际 rest_command 返回 202；当前 idle |
 | iPhone | iPhone 17 Pro，iPhone Telemetry Hub | `/api/ingest/iphone` | 仍指向 `https://lyjw131.com/api/ingest/iphone`，用户选择稍后自行修改 |
 
-iPhone 应改为 `https://ingest.homepage.lyjw.llc/api/ingest/iphone`，保留原密钥。
+iPhone 待完成镜像设置，应改为 `https://api.homepage.lyjw.llc/api/ingest/iphone`，保留原密钥。
 本次未改动手机设置。文档和 App 的地址提示已更新，提示更新不等于已安装 App 的配置迁移。
 
 PlayStation 配置提交为 `3cfa634`，部署版本为 `93caea56-d57d-4f39-8c19-f8b01ee0f320`。

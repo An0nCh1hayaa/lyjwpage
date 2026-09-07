@@ -10,7 +10,7 @@
  * 淹掉，久了就没人看那个浮层了。
  *
  * 单独成一个文件、不放在 lib/api：各 store 的读取函数都要抛它，而 lib/api 引着
- * `next/server`。写侧那些 store 同时也被 workers/ingest 打进 Worker 的包，那边没有 Next。
+ * `next/server`。写侧那些 store 同时也被 workers/api 打进 Worker 的包，那边没有 Next。
  */
 export class AwaitingReport extends Error {
   constructor(message: string) {

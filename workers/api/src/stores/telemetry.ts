@@ -29,14 +29,14 @@ import type {
   LocalNowPlaying,
   TimezoneActivity
 } from "@/lib/types";
-import { fanout, type PendingEvent } from "@ingest/fanout";
-import { putAppleMusicCredentials } from "@ingest/stores/apple-music-credentials";
-import { prepareHeartbeat, prepareStatus } from "@ingest/stores/charger-store";
-import { writeSettlingAt } from "@ingest/stores/charging-settling";
-import { prepareStatus as preparePowerBankStatus } from "@ingest/stores/powerbank-store";
-import { writeLiveness } from "@ingest/stores/reporter-liveness";
-import { prepareVibeCodingNow, prepareVibeCodingUsage } from "@ingest/stores/vibecoding";
-import { prepareVibeCodingYear } from "@ingest/stores/vibecoding-year-store";
+import { fanout, type PendingEvent } from "@api/fanout";
+import { putAppleMusicCredentials } from "@api/stores/apple-music-credentials";
+import { prepareHeartbeat, prepareStatus } from "@api/stores/charger-store";
+import { writeSettlingAt } from "@api/stores/charging-settling";
+import { prepareStatus as preparePowerBankStatus } from "@api/stores/powerbank-store";
+import { writeLiveness } from "@api/stores/reporter-liveness";
+import { prepareVibeCodingNow, prepareVibeCodingUsage } from "@api/stores/vibecoding";
+import { prepareVibeCodingYear } from "@api/stores/vibecoding-year-store";
 import { DESKTOP_ICON_CACHE_LIMIT, desktopPayload, mirror, type PersistedTelemetry, snapshotFrom, type StoredDesktopActivity, syncTelemetryState, telemetryState } from "@shared/telemetry";
 
 type TelemetryPatch = {

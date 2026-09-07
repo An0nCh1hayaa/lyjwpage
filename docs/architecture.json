@@ -21,15 +21,15 @@
           "agent_limits",
           "server_reporter",
           "psn_reporter",
-          "ingest"
+          "api"
         ],
-        "note": "七个数据来源、八个运行实例，统一直连 ingest Worker。"
+        "note": "七个数据来源、八个运行实例，统一直连 API Worker。"
       },
       {
         "id": "sites",
         "label": "国内与国际站",
         "focus": [
-          "ingest",
+          "api",
           "shared_redis",
           "sites",
           "visitors"
@@ -195,10 +195,10 @@
       ]
     },
     {
-      "id": "ingest",
+      "id": "api",
       "type": "messagebus",
-      "label": "ingest Worker",
-      "sublabel": "ingest.homepage.lyjw.llc",
+      "label": "API Worker",
+      "sublabel": "api.homepage.lyjw.llc",
       "tag": "接收 · 写入 · 广播 · 在线人数",
       "pos": [
         556.0,
@@ -210,10 +210,10 @@
       ],
       "sources": [
         {
-          "path": "workers/ingest/src/index.ts"
+          "path": "workers/api/src/index.ts"
         },
         {
-          "path": "workers/ingest/wrangler.toml"
+          "path": "workers/api/wrangler.toml"
         }
       ]
     },
@@ -308,7 +308,7 @@
     {
       "id": "post_mac",
       "from": "mac_hub",
-      "to": "ingest",
+      "to": "api",
       "label": "POST",
       "variant": "emphasis",
       "labelAt": [
@@ -319,7 +319,7 @@
     {
       "id": "post_iphone",
       "from": "iphone_hub",
-      "to": "ingest",
+      "to": "api",
       "label": "POST",
       "variant": "emphasis",
       "labelAt": [
@@ -330,7 +330,7 @@
     {
       "id": "post_homepod",
       "from": "home_assistant",
-      "to": "ingest",
+      "to": "api",
       "label": "POST",
       "variant": "emphasis",
       "labelAt": [
@@ -341,7 +341,7 @@
     {
       "id": "post_emby",
       "from": "emby_proxy",
-      "to": "ingest",
+      "to": "api",
       "label": "POST",
       "variant": "emphasis",
       "labelAt": [
@@ -352,7 +352,7 @@
     {
       "id": "post_agents",
       "from": "agent_limits",
-      "to": "ingest",
+      "to": "api",
       "label": "POST",
       "variant": "emphasis",
       "labelAt": [
@@ -363,7 +363,7 @@
     {
       "id": "post_server",
       "from": "server_reporter",
-      "to": "ingest",
+      "to": "api",
       "label": "POST",
       "variant": "emphasis",
       "labelAt": [
@@ -374,7 +374,7 @@
     {
       "id": "post_playstation",
       "from": "psn_reporter",
-      "to": "ingest",
+      "to": "api",
       "label": "POST",
       "variant": "emphasis",
       "labelAt": [
@@ -384,7 +384,7 @@
     },
     {
       "id": "store",
-      "from": "ingest",
+      "from": "api",
       "to": "shared_redis",
       "label": "写入状态",
       "variant": "emphasis"
@@ -399,7 +399,7 @@
     },
     {
       "id": "revalidate",
-      "from": "ingest",
+      "from": "api",
       "to": "sites",
       "label": "/api/revalidate · Vercel",
       "variant": "dashed",
@@ -418,14 +418,14 @@
     },
     {
       "id": "push",
-      "from": "ingest",
+      "from": "api",
       "to": "visitors",
       "label": "/ws + /online/ws",
       "variant": "emphasis"
     },
     {
       "id": "head",
-      "from": "ingest",
+      "from": "api",
       "to": "images",
       "label": "HEAD 确认对象",
       "labelAt": [
@@ -447,7 +447,7 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "一个 ingest 服务",
+      "title": "一个 API 服务",
       "items": [
         "/ws 推送事件；/online/ws 统计可见页面；/count 返回两类人数。",
         "Agent、server、PlayStation 按在线人数调频；最近在听由 cron 刷新。"

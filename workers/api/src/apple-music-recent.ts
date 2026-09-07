@@ -8,8 +8,8 @@ import { cached, claim } from "@/lib/cache";
 import { LISTENING_TAG } from "@/lib/live-events";
 import { withStorageScope } from "@/lib/storage";
 import type { ListeningItem } from "@/lib/types";
-import { fanout } from "@ingest/fanout";
-import { prepareRecentlyPlayed } from "@ingest/stores/apple-music-store";
+import { fanout } from "@api/fanout";
+import { prepareRecentlyPlayed } from "@api/stores/apple-music-store";
 import { afterResponse } from "./live-platform";
 
 /**

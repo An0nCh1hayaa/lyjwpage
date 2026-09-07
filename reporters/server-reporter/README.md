@@ -16,7 +16,7 @@ CPU 占用和网卡速率都是这一段间隔的平均，不是「这一瞬间�
 
 站点那侧**没有实时推送**。这些数字每个间隔都在变，广播就是拿推送当轮询用；卡片 30 秒自己来问。
 
-每轮收尾问一次 ingest Worker 的 `GET /count`（超时 2.5 秒），一次拿到两个数，据此选下一轮的档：
+每轮收尾问一次 API Worker 的 `GET /count`（超时 2.5 秒），一次拿到两个数，据此选下一轮的档：
 
 | 问到什么 | 下一轮 | 变量 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ CPU 占用和网卡速率都是这一段间隔的平均，不是「这一瞬间�
 
 卡片那侧仍是 30 秒一问（和充电头一档），比快档还勤 —— 多出来那一趟拿到的是同一份数字，是有意留的：那是浏览器自己的节奏，不该由上报器的档位决定。
 
-人头数读的是上报那同一个 `SITE_URL`。ingest Worker 是**一份生产一个**，填的是 Vercel 那一份，所以国内那份生产上开着的后台页面不进这个判断 —— 少数了只会更慢，和读不到时同一个方向。
+人头数读的是上报那同一个 `SITE_URL`。API Worker 是**一份生产一个**，填的是 Vercel 那一份，所以国内那份生产上开着的后台页面不进这个判断 —— 少数了只会更慢，和读不到时同一个方向。
 
 断流窗口锚的是**慢档**：站点 `lib/freshness` 的 `SERVER_STALE_MS` 默认 50 分钟 = 三轮 + 缓存余量，和另外两路的窗口同一个数。改慢档必须同步改那边，改另外两档不用。顺序是**站点那侧先放宽窗口并部署，这边再降频**，反过来做中间那段时间卡片会一直显示离线。
 
@@ -42,7 +42,7 @@ CPU 占用和网卡速率都是这一段间隔的平均，不是「这一瞬间�
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://ingest.homepage.lyjw.llc`。上报端点和人头数的 `/count` 都由上报器从它拼 |
+| `SITE_URL` | ✅ | 上报 Worker 的源，如 `https://api.homepage.lyjw.llc`。上报端点和人头数的 `/count` 都由上报器从它拼 |
 | `SITE_INGEST_URL` | | 直接给完整端点，给了就不用 `SITE_URL` 上报；人头数仍只从 `SITE_URL` 读，没配就永远走最慢那档 |
 | `TELEMETRY_INGEST_SECRET` | ✅ | 和站点同名变量对上，作 Bearer 鉴权。站点没配时才可留空 |
 | `HOST_ID` | | 默认 `misaka-jp`，卡片上认的名字 |
@@ -76,7 +76,7 @@ ssh misaka-jp 'cat > /opt/lyjwpage/server-reporter/.env && chmod 600 /opt/lyjwpa
 ssh misaka-jp 'install -m 644 /opt/lyjwpage/server-reporter/server-reporter.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now server-reporter'
 ```
 
-生产的 `SITE_URL` 统一填 `https://ingest.homepage.lyjw.llc`，不经 Vercel 或 EdgeOne 站点。
+生产的 `SITE_URL` 统一填 `https://api.homepage.lyjw.llc`，不经 Vercel 或 EdgeOne 站点。
 
 看日志：`journalctl -u server-reporter -f`。
 

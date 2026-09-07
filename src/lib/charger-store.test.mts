@@ -4,7 +4,7 @@ import test from "node:test";
 import { getStored, readChargerState } from "@/lib/charger-store";
 import { installStorageForTests, resetStorageForTests } from "@/lib/storage";
 import { FakeStorage } from "@/lib/testing/fake-storage";
-import { prepareHeartbeat } from "@ingest/stores/charger-store";
+import { prepareHeartbeat } from "@api/stores/charger-store";
 import { K_HISTORY, K_LATEST } from "@shared/charger-store";
 
 test("读取隐藏过期充电曲线，实际删除仅由 Worker 心跳完成", async () => {

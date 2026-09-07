@@ -11,7 +11,7 @@ Cloudflare Worker 上的 PSN 上报器：cron 每分钟响一次，前面挡一�
 当轮爬完、对齐、整份交付。
 
 鉴权链和两个读取端点已经用真实凭据跑通，也确认 `Accept-Language: zh-Hans` 会返回
-官方中文名。ingest Worker 的 `/api/ingest/playstation` 已经存在，`wrangler.toml` 里也配了
+官方中文名。API Worker 的 `/api/ingest/playstation` 已经存在，`wrangler.toml` 里也配了
 `SITE_URL`，所以默认不是 dry-run。
 
 ## 调度与状态
@@ -20,9 +20,9 @@ Cloudflare Worker 上的 PSN 上报器：cron 每分钟响一次，前面挡一�
 先过一道门，门开了才是一轮完整 tick：
 
 - 读 KV 里 `meta:lastFullTick`（上一轮完整 tick 的**开始**时刻）；
-- 攒够 14.5 分钟就直接放行，连人头数都不问 —— 闲时节奏不该依赖 ingest Worker 可不可达；
+- 攒够 14.5 分钟就直接放行，连人头数都不问 —— 闲时节奏不该依赖 API Worker 可不可达；
 - 不到 55 秒直接挡回去；
-- 中间那段问一次 ingest Worker 的 `GET /count`（超时 2.5 秒），一次拿到两个数：
+- 中间那段问一次 API Worker 的 `GET /count`（超时 2.5 秒），一次拿到两个数：
   `online` 大于 0（有页面**可见**）就放行；否则已经攒够 115 秒、且 `connections`
   大于 0（有页面**开着**）也放行。
 
@@ -292,11 +292,11 @@ titleId，屏蔽的游戏不上报、不占窗口；改这份名单会重推奖�
 2. 按需要写入 secret：`PSN_NPSSO`，以及站点侧要求鉴权时用的
    `TELEMETRY_INGEST_SECRET`。
 
-`SITE_URL=https://ingest.homepage.lyjw.llc` 已经在 `wrangler.toml` 里配好，不必再动。要临时回到 dry-run 就把它注释掉。
+`SITE_URL=https://api.homepage.lyjw.llc` 已经在 `wrangler.toml` 里配好，不必再动。要临时回到 dry-run 就把它注释掉。
 
 门读的人头数也来自这同一个源（路径由这边拼 `/count`，和站点侧 `NEXT_PUBLIC_LIVE_PUSH_URL`
 同一个形状）。只配 `SITE_INGEST_URL` 不配 `SITE_URL` 时人头数读不到，上报不停摆，只是
-一路退到 15 分钟一轮的基线节奏。ingest Worker 一份生产一个，这是 Vercel 那一份 ——
+一路退到 15 分钟一轮的基线节奏。API Worker 一份生产一个，这是 Vercel 那一份 ——
 国内那份生产上开着的页面因此不进判断，少数了只会更慢。
 
 本目录是独立 npm 部署单元，保留自己的 `package-lock.json`。重生成时必须在没有
