@@ -34,16 +34,12 @@ pnpm dev
 
 Workers 是唯一数据后端：接收上报、持久化 Durable Objects SQLite、提供状态 API、获取并缓存外部数据，以及 WebSocket 和在线人数。Vercel 负责首屏 HTML、Next.js 页面缓存、静态资源和图片处理。
 
-```mermaid
-flowchart LR
-  Reporter[上报器] --> Worker[Worker]
-  Worker <--> SQL[StateHub / SQLite]
-  Worker --> External[Apple / GitHub]
-  Vercel[Vercel 首屏及缓存] -->|生成或后台重建时 GET /api/home| Worker
-  Worker -->|鉴权 POST /api/revalidate，仅展示变化| Vercel
-  Browser[浏览器] -->|首次 HTML / 图片| Vercel
-  Browser <-->|挂载后状态查询 / WebSocket| Worker
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.png">
+  <img alt="主页上报与 Vercel 读取架构" src="docs/architecture-light.png">
+</picture>
+
+[交互版架构图](docs/architecture.html)
 
 Vercel 没有状态 API 转发或私有存储读取端点。聚合快照只包含公开卡片数据，凭据仅留在 Worker。浏览器配置 `NEXT_PUBLIC_BACKEND_URL` 后直接查询 Worker，SWR 仍使用统一的路径键处理推送与轮询。
 
