@@ -14,6 +14,7 @@ import {
 import useSWR, { preload, useSWRConfig } from "swr";
 
 import { TrophyMetal } from "@/components/trophies/trophy-metal";
+import { backendUrl } from "@/lib/backend-url";
 import { LIST_TRANSITION, STATIC_TRANSITION } from "@/lib/motion";
 import {
 } from "@/lib/playstation-image";
@@ -100,7 +101,7 @@ function formatEarnedRate(rate: number): string {
 }
 
 async function fetchCatalog(path: string): Promise<StatusResponse<TrophiesPayload>> {
-  const response = await fetch(path, { cache: "no-store" });
+  const response = await fetch(backendUrl(path), { cache: "no-store" });
   if (!response.ok) throw new Error(`请求 ${path} 失败：${response.status}`);
   return response.json();
 }
