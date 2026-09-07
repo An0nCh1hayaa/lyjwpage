@@ -25,6 +25,7 @@ import type {
   VibeCodingPayload,
   VibeCodingTotals,
 } from "@/lib/types";
+import { canonicalModelName } from "@/lib/model-identity";
 import { cn } from "@/lib/utils";
 
 /**
@@ -165,7 +166,7 @@ function BrandMark({
 }
 
 function ModelProviderIcon({ model }: { model: string }) {
-  const name = model.toLowerCase();
+  const name = canonicalModelName(model).toLowerCase();
   const mark = name.startsWith("claude") ? (
     <AnthropicIcon size={16} />
   ) : name.startsWith("grok") ? (
@@ -226,18 +227,19 @@ function capitalize(part: string) {
  */
 function formatModelName(model: string) {
   if (!model) return model;
-  const claude = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/i.exec(model);
+  const resolved = canonicalModelName(model);
+  const claude = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/i.exec(resolved);
   if (claude) {
     const [, family, major, minor] = claude;
     return `Claude ${capitalize(family)} ${major}${minor ? `.${minor}` : ""}`;
   }
-  const gpt = /^gpt-(\d+(?:\.\d+)?)(?:-(.+))?$/i.exec(model);
+  const gpt = /^gpt-(\d+(?:\.\d+)?)(?:-(.+))?$/i.exec(resolved);
   if (gpt) {
     const [, version, variant] = gpt;
     const suffix = variant ? ` ${variant.split("-").map(capitalize).join(" ")}` : "";
     return `GPT ${version}${suffix}`;
   }
-  return model.split("-").map(capitalize).join(" ");
+  return resolved.split("-").map(capitalize).join(" ");
 }
 
 function TotalUsage({
@@ -817,7 +819,9 @@ function AgentPanel({
    */
   const active = agent.active && !activityUnknown;
   // 会话扫描会保留最近使用的模型，闲置后继续显示它。
-  const displayModel = agent.currentModel ?? "暂无模型";
+  const displayModel = agent.currentModel
+    ? formatModelName(agent.currentModel)
+    : "暂无模型";
   const rows = featuredLimitRows(agent);
   return (
     <div className="flex min-w-0 flex-col px-4 py-4 md:px-5">
